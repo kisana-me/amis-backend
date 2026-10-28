@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
+import { savePlot } from "../writers/plot";
 import {
   CHAT_STATUSES, CONTENT_STATUSES, characterImages, chats, lores, personas, plotImages, plotLikes, plotLores, plots, VISIBILITIES,
 } from "../db/schema";
@@ -10,7 +11,7 @@ import type { AppEnv } from "../env";
 import { notFound } from "../lib/http";
 import { maxRatingFor } from "../lib/ratings";
 import { findVisiblePlot, visiblePlots } from "../queries/visibility";
-import { loadCasts, loadContext, loadersOf } from "../views/context";
+import { loadCasts, loadContext, loadersOf, type Plot } from "../views/context";
 import {
   chapterDefinitions, chapterEditDefinitions, editableCharacterJson, editableLoreJson, imageDisplayUrl, imageJson, imageUrl,
   openingImageAids, openingLines, ownedImageJson, plotIconUrl, plotJson, visibilityLabel,
@@ -31,12 +32,9 @@ plotRoutes.post("/plots", async (c) => {
 });
 
 // 編集用。公開向けの show と違い、章のねらいや非公開設定、付いている設定集の中身まで返す (本体の plots#edit)
-plotRoutes.post("/plots/:aid/edit", requireSignin, async (c) => {
+async function plotEditJson(c: Context<AppEnv>, plot: Plot) {
   const { db } = c.var;
   const viewer = c.var.currentAccount!;
-  const [plot] = await db.select().from(plots)
-    .where(and(eq(plots.aid, c.req.param("aid")), ne(plots.status, CONTENT_STATUSES.deleted), eq(plots.authorId, viewer.id))).limit(1);
-  if (!plot) return notFound(c, "プロットが見つかりませんでした");
 
   const [casts, images, attached, recommended] = await Promise.all([
     loadCasts(db, [plot]),
@@ -58,7 +56,7 @@ plotRoutes.post("/plots/:aid/edit", requireSignin, async (c) => {
     imageIds: [...images.map((i) => i.imageId), ...imageIdsOf(owned.values())],
   });
 
-  return c.json({
+  return {
     status: "success",
     plot: {
       aid: plot.aid, title: plot.title, tagline: plot.tagline, description: plot.description,
@@ -88,7 +86,40 @@ plotRoutes.post("/plots/:aid/edit", requireSignin, async (c) => {
       lores: attachedLores.map((lore) => editableLoreJson(lore, entries.get(lore.id) ?? [], ctx, viewer.id)),
       recommended_personas: recommended.map((p) => ({ aid: p.aid, name: p.name, description: p.description })),
     },
-  });
+  };
+}
+
+async function findOwnPlot(c: Context<AppEnv>, aid: string): Promise<Plot | null> {
+  const [plot] = await c.var.db.select().from(plots)
+    .where(and(eq(plots.aid, aid), ne(plots.status, CONTENT_STATUSES.deleted), eq(plots.authorId, c.var.currentAccount!.id))).limit(1);
+  return plot ?? null;
+}
+
+plotRoutes.post("/plots/:aid/edit", requireSignin, async (c) => {
+  const plot = await findOwnPlot(c, c.req.param("aid"));
+  if (!plot) return notFound(c, "プロットが見つかりませんでした");
+  return c.json(await plotEditJson(c, plot));
+});
+
+plotRoutes.post("/plots/create", requireSignin, async (c) => {
+  const result = await savePlot(c, null);
+  if (!result.ok) return c.json({ status: "error", message: result.message }, 422);
+  return c.json(await plotEditJson(c, (await findOwnPlot(c, result.aid))!));
+});
+
+plotRoutes.patch("/plots/:aid", requireSignin, async (c) => {
+  const plot = await findOwnPlot(c, c.req.param("aid"));
+  if (!plot) return notFound(c, "プロットが見つかりませんでした");
+  const result = await savePlot(c, plot);
+  if (!result.ok) return c.json({ status: "error", message: result.message }, 422);
+  return c.json(await plotEditJson(c, (await findOwnPlot(c, result.aid))!));
+});
+
+plotRoutes.delete("/plots/:aid", requireSignin, async (c) => {
+  const plot = await findOwnPlot(c, c.req.param("aid"));
+  if (!plot) return notFound(c, "プロットが見つかりませんでした");
+  await c.var.db.update(plots).set({ status: CONTENT_STATUSES.deleted }).where(eq(plots.id, plot.id));
+  return c.json({ status: "success" });
 });
 
 // 本体の plots#show。一覧に出ないものでも作者本人には見せる。結末 (endings) は廃止した

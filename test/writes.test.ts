@@ -141,3 +141,94 @@ describe("設定集", () => {
     expect(await db().select().from(plots)).toHaveLength(0);
   });
 });
+
+// 本体の test/services/amis/plot_writer_test.rb を移したもの (結末は廃止したので保存されないことを確かめる)
+describe("プロットの作成・更新・削除", () => {
+  function plotForm(values: Record<string, unknown>, files: File[] = []) {
+    const base = { title: "転校生", description: "紹介文。", situation: "春の教室。", visibility: "closed", user_rating: "general", allow_fork: "false" };
+    const form = new FormData();
+    for (const [key, value] of Object.entries({ ...base, ...values })) {
+      form.append(`plot[${key}]`, typeof value === "string" ? value : JSON.stringify(value));
+    }
+    for (const file of files) form.append("plot[images_files][]", file);
+    return form;
+  }
+  const create = (values: Record<string, unknown>, files?: File[]) => json(send("POST", "/plots/create", plotForm(values, files)));
+  const update = (aid: string, values: Record<string, unknown>, files?: File[]) => json(send("PATCH", `/plots/${aid}`, plotForm(values, files)));
+
+  async function twoCharacters() {
+    return [await insertCharacter({ name: "ユキ", authorId: 1 }), await insertCharacter({ name: "Ren Kai", authorId: 1 })];
+  }
+
+  it("出演・章・導入・推奨ペルソナをまとめて作る。結末は保存しない", async () => {
+    const [yuki, ren] = await twoCharacters();
+    const res = await create({
+      cast_json: [{ character_aid: yuki.aid, role_name: "同級生", is_lead: "true" }, { character_aid: ren.aid, role_name: "友人", is_lead: "false" }],
+      chapters_json: [{ key: "ch1", title: "出会い", objective: "名前を覚えられる", endings: [{ key: "lover", title: "恋人になる" }] }],
+      opening_json: [{ character_aid: null, text: "教室のドアが開いた。" }, { character_aid: yuki.aid, text: "……あ、きみが噂の転校生？" }],
+      personas_json: [{ name: "転校生", description: "きたばかり" }],
+    });
+    expect(res.status).toBe("success");
+    expect(res.plot.cast.map((c: any) => [c.speaker_key, c.is_lead, c.role_name])).toEqual([["cast", true, "同級生"], ["renkai", false, "友人"]]);
+    expect(res.plot.chapters).toEqual([{ key: "ch1", title: "出会い", objective: "名前を覚えられる" }]);
+    expect(res.plot.recommended_personas.map((p: any) => p.name)).toEqual(["転校生"]);
+    // 導入の話者は character_aid から speaker_key に解決される
+    expect(res.plot.opening.map((l: any) => [l.speaker, l.character_aid])).toEqual([[null, null], ["cast", yuki.aid]]);
+    const [plot] = await db().select().from(plots);
+    expect(plot.chapters).toEqual([{ key: "ch1", title: "出会い", objective: "名前を覚えられる" }]);
+    expect(plot.authorId).toBe(1);
+    expect((await db().select().from(characters).where(eq(characters.id, yuki.id)))[0].leadsCount).toBe(1);
+  });
+
+  it("主役の指定が無ければ先頭が主役になる", async () => {
+    const [yuki, ren] = await twoCharacters();
+    const res = await create({ cast_json: [{ character_aid: ren.aid }, { character_aid: yuki.aid }] });
+    expect(res.plot.cast.map((c: any) => c.is_lead)).toEqual([true, false]);
+  });
+
+  it("出演から外したキャラは導入から消えて地の文になり、主役の数も数え直す", async () => {
+    const [yuki, ren] = await twoCharacters();
+    const created = await create({ cast_json: [{ character_aid: yuki.aid, is_lead: "true" }], opening_json: [{ character_aid: yuki.aid, text: "こんにちは" }] });
+    const updated = await update(created.plot.aid, { cast_json: [{ character_aid: ren.aid, is_lead: "true" }], opening_json: [{ character_aid: yuki.aid, text: "こんにちは" }] });
+    expect(updated.plot.cast.map((c: any) => c.character.aid)).toEqual([ren.aid]);
+    expect(updated.plot.opening[0].speaker).toBeNull();
+    expect((await db().select().from(characters).where(eq(characters.id, yuki.id)))[0].leadsCount).toBe(0);
+  });
+
+  it("外した推奨ペルソナはソフトデリートされる", async () => {
+    const created = await create({ personas_json: [{ name: "転校生" }] });
+    await update(created.plot.aid, { personas_json: [] });
+    expect((await db().select().from(personas))[0].status).toBe(2);
+  });
+
+  it("出演がいなければ公開できず、他人の出演不可のキャラは出せない", async () => {
+    expect((await create({ visibility: "opened", cast_json: [] })).message).toContain("出演キャラが1人以上必要");
+    const guarded = await insertCharacter({ name: "非公開", authorId: 2, allowCasting: false });
+    expect((await create({ cast_json: [{ character_aid: guarded.aid }] })).message).toContain("出演させられません");
+  });
+
+  it("画像は状況とシークレットを持って並び順どおりに入り、image_aid で残して外れた行は消える。挿絵は添字で指せる", async () => {
+    const created = await create({
+      images_json: [{ upload: 0, situation: "序盤", secret: false }, { upload: 1, situation: "結末", secret: true }],
+      opening_json: [{ character_aid: null, text: "扉が開いた。", image_index: 1 }],
+    }, [png("a.png"), png("b.png")]);
+    expect(created.plot.images.map((i: any) => [i.situation, i.secret])).toEqual([["序盤", false], ["結末", true]]);
+    const [kept, removed] = created.plot.images.map((i: any) => i.aid);
+    expect(created.plot.opening[0].image).toBe(removed);
+
+    const updated = await update(created.plot.aid, { images_json: [{ image_aid: kept, situation: "書き換えた" }] });
+    expect(updated.plot.images.map((i: any) => [i.aid, i.situation])).toEqual([[kept, "書き換えた"]]);
+  });
+
+  it("章が不正なら何も保存されない", async () => {
+    expect((await create({ chapters_json: [{ key: "ダメなキー" }] })).message).toBe("章[0] キーは正しい形式で入力してください");
+    expect(await db().select().from(plots)).toHaveLength(0);
+  });
+
+  it("他人のプロットは更新も削除もできない", async () => {
+    const created = await create({});
+    expect((await send("PATCH", `/plots/${created.plot.aid}`, plotForm({ title: "乗っ取り" }), "other")).status).toBe(404);
+    expect((await send("DELETE", `/plots/${created.plot.aid}`, undefined, "other")).status).toBe(404);
+    expect((await send("DELETE", `/plots/${created.plot.aid}`)).status).toBe(200);
+  });
+});
