@@ -7,7 +7,16 @@ import { d1 } from "../src/db/client";
 import * as schema from "../src/db/schema";
 import type { MainDb } from "../src/lib/main-db";
 
-export const ctx = { waitUntil: () => undefined, passThroughOnException: () => undefined, props: {} } as unknown as ExecutionContext;
+// waitUntil に渡された処理 (章の要約など) を、テストから待てるように溜めておく
+const background: Promise<unknown>[] = [];
+export const ctx = {
+  waitUntil: (promise: Promise<unknown>) => void background.push(promise),
+  passThroughOnException: () => undefined,
+  props: {},
+} as unknown as ExecutionContext;
+export async function settle() {
+  while (background.length > 0) await Promise.allSettled(background.splice(0));
+}
 export const db = () => d1(env.DB);
 
 let seq = 0;

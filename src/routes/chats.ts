@@ -3,24 +3,26 @@ import { Hono } from "hono";
 import type { Db } from "../db/client";
 import { inChunks } from "../db/client";
 import {
-  aiModels, CHAT_STATUSES, CONTENT_STATUSES, characters, chatMessages, chats, characterImages, MESSAGE_ROLES, MESSAGE_STATUSES, personas,
-  plotImages, plots,
+  aiModels, CHAT_STATUSES, CONTENT_STATUSES, characters, chatMessages, chats, MESSAGE_ROLES, MESSAGE_STATUSES, personas,
+  plots,
 } from "../db/schema";
-import { contentRating, findModelByAid, ModelUnavailable, resolveModel } from "../generation/models";
+import { allowsRating, contentRating, findModelByAid, ModelUnavailable, resolveModel } from "../generation/models";
+import { charLength, isPresent, rubyStrip } from "../generation/ruby-text";
 import { newAid } from "../lib/aid";
 import { findVisiblePlot } from "../queries/visibility";
 import type { AppEnv } from "../env";
-import { jsonBody, notFound } from "../lib/http";
+import { castBoolean, jsonBody, notFound } from "../lib/http";
 import { maxRatingFor } from "../lib/ratings";
 import { requireSignin } from "../middleware/auth";
-import { pendingMessage } from "../generation/stall";
+import { IN_FLIGHT, pendingMessage } from "../generation/stall";
 import { variantChain } from "../generation/variants";
 import { usagePercent, weeklyCostMicro } from "../usage/weekly";
 import {
   chatJson, currentSceneStatus, excerpt, HIDDEN_MESSAGE_STATUSES, imageAids, isVisibleAssistant, messageJson,
 } from "../views/chat";
 import { type Chat, type ChatMessage, loadCasts, loadContext, loadersOf, type Plot, type ViewContext } from "../views/context";
-import { chapterDefinitions, imageDisplayUrl, imageUrl, leadCast, openingImageAids, openingLines } from "../views/json";
+import { chapterDefinitions, imageDisplayUrl, leadCast, openingImageAids, openingLines } from "../views/json";
+import { paletteFor, type SceneImageRow, sceneImageCandidates } from "../views/palette";
 
 const LIMIT = 30;
 
@@ -176,6 +178,73 @@ export async function chatShowJson(c: Parameters<typeof loadersOf>[0], chat: Cha
   };
 }
 
+const REPLY_STYLE_KEYS: Record<string, number> = { balanced: 0, dialogue: 1, narration: 2 };
+const MAX_TITLE = 100;
+
+// チャット設定モーダルからの更新。渡ってきたキーだけを触る (本体の chats#update)
+chatRoutes.patch("/chats/:aid", requireSignin, async (c) => {
+  const { db } = c.var;
+  const account = c.var.currentAccount!;
+  const chat = await findChat(db, c.req.param("aid"), account.id);
+  if (!chat) return notFound(c, "チャットが見つかりませんでした");
+  const body = await jsonBody(c);
+  const error = (message: string) => c.json({ status: "error", message }, 422);
+
+  const values: Partial<typeof chats.$inferInsert> = {};
+  if ("title" in body) {
+    const title = rubyStrip(String(body.title ?? ""));
+    if (charLength(title) > MAX_TITLE) return error(`タイトルは${MAX_TITLE}文字以内で入力してください`);
+    values.title = title;
+  }
+  if ("choice_mode" in body) values.choiceMode = castBoolean(body.choice_mode) === true;
+  // アーカイブは status で表す。解除したときに完結済みへ戻せるよう finished_at を見る
+  if ("archived" in body) {
+    values.status = castBoolean(body.archived) === true
+      ? CHAT_STATUSES.archived
+      : chat.finishedAt !== null ? CHAT_STATUSES.finished : CHAT_STATUSES.normal;
+  }
+  if ("reply_style" in body) {
+    const style = REPLY_STYLE_KEYS[String(body.reply_style ?? "")];
+    if (style === undefined) return error("応答スタイルが不正です");
+    values.replyStyle = style;
+  }
+  if ("model_aid" in body) {
+    const model = await findModelByAid(db, body.model_aid);
+    if (!model || model.status !== CONTENT_STATUSES.normal) return error("モデルが見つかりませんでした");
+    const [plot] = await db.select().from(plots).where(eq(plots.id, chat.plotId)).limit(1);
+    if (!allowsRating(model, await contentRating(db, plot))) return error("このプロットのレーティングでは使えないモデルです");
+    values.aiModelId = model.id;
+  }
+  if ("persona_aid" in body) {
+    if (isPresent(body.persona_aid)) {
+      const persona = await findPersona(db, chat.plotId, account.id, body.persona_aid);
+      if (!persona) return error("ペルソナが見つかりませんでした");
+      values.personaId = persona.id;
+    } else {
+      values.personaId = null;
+    }
+  }
+
+  const [updated] = Object.keys(values).length > 0
+    ? await db.update(chats).set(values).where(eq(chats.id, chat.id)).returning()
+    : [chat];
+  return c.json(await chatShowJson(c, updated));
+});
+
+// ソフトデリート。進行中の生成は止めてから消す (本体の ChatService.soft_delete!)
+chatRoutes.delete("/chats/:aid", requireSignin, async (c) => {
+  const { db } = c.var;
+  const chat = await findChat(db, c.req.param("aid"), c.var.currentAccount!.id);
+  if (!chat) return notFound(c, "チャットが見つかりませんでした");
+
+  await db.batch([
+    db.update(chatMessages).set({ status: MESSAGE_STATUSES.canceled, streamedAt: new Date() })
+      .where(and(eq(chatMessages.chatId, chat.id), inArray(chatMessages.status, IN_FLIGHT))),
+    db.update(chats).set({ status: CHAT_STATUSES.deleted }).where(eq(chats.id, chat.id)),
+  ]);
+  return c.json({ status: "success" });
+});
+
 // 本文を編集するときに選べる絵の一覧 (本体の chats#palette)
 chatRoutes.post("/chats/:aid/palette", requireSignin, async (c) => {
   const { db } = c.var;
@@ -183,55 +252,16 @@ chatRoutes.post("/chats/:aid/palette", requireSignin, async (c) => {
   const chat = await findChat(db, c.req.param("aid"), account.id);
   if (!chat) return notFound(c, "チャットが見つかりませんでした");
 
-  const [[plot], messages] = await Promise.all([
+  const [[plot], [latest]] = await Promise.all([
     db.select().from(plots).where(eq(plots.id, chat.plotId)).limit(1),
     db.select().from(chatMessages)
       .where(and(eq(chatMessages.chatId, chat.id), eq(chatMessages.role, MESSAGE_ROLES.assistant), eq(chatMessages.status, MESSAGE_STATUSES.normal)))
       .orderBy(desc(chatMessages.id)).limit(1),
   ]);
   // 直近の返答が使っている絵は、作者が伏せた絵でも候補に残す (選び直せないと保存もできなくなるため)
-  const keep = messages[0] ? imageAids(messages[0]) : new Set<string>();
-  const rows = await sceneImageCandidates(db, plot);
-  const ctx = await loadContext(loadersOf(c), { imageIds: rows.map((r) => r.imageId) });
-  const maxRating = maxRatingFor(account);
-
-  // ラベルの無い絵は scene_images に載らない = 選んでも表示できないので候補にしない
-  const entry = (row: SceneImageRow) => {
-    const image = ctx.images.get(row.imageId);
-    if (row.secret && !(image && keep.has(image.aid))) return [];
-    if (row.situation.trim() === "" || !image || image.status !== CONTENT_STATUSES.normal || (image.rating ?? 0) > maxRating) return [];
-    return [{ aid: image.aid, url: imageUrl(image, ctx), situation: row.situation, secret: row.secret }];
-  };
-  const casts = (await loadCasts(db, [plot])).get(plot.id) ?? [];
-  return c.json({
-    status: "success",
-    plot_images: rows.filter((r) => r.kind === "plot").flatMap(entry),
-    characters: Object.fromEntries(casts.map(({ plotCharacter, character }) => [
-      plotCharacter.speakerKey,
-      rows.filter((r) => r.kind === "character" && r.characterId === character.id).flatMap(entry),
-    ])),
-  });
+  const keep = latest ? imageAids(latest) : new Set<string>();
+  return c.json({ status: "success", ...(await paletteFor(loadersOf(c), plot, keep)) });
 });
-
-type SceneImageRow = { kind: "plot" | "character"; characterId: number | null; imageId: number; situation: string; secret: boolean };
-
-// プロットの絵 (position, id 順) → 出演者の絵 (出演順、各キャラの position, id 順)
-async function sceneImageCandidates(db: Db, plot: Plot): Promise<SceneImageRow[]> {
-  const [plotRows, casts] = await Promise.all([
-    db.select().from(plotImages).where(eq(plotImages.plotId, plot.id)).orderBy(asc(plotImages.position), asc(plotImages.id)),
-    loadCasts(db, [plot]),
-  ]);
-  const characterIds = (casts.get(plot.id) ?? []).map((cast) => cast.character.id);
-  const characterRows = characterIds.length === 0 ? [] : await inChunks(characterIds, (chunk) =>
-    db.select().from(characterImages).where(inArray(characterImages.characterId, chunk)));
-  characterRows.sort((a, b) => a.position - b.position || a.id - b.id);
-
-  return [
-    ...plotRows.map((r) => ({ kind: "plot" as const, characterId: null, imageId: r.imageId, situation: r.situation, secret: r.secret })),
-    ...characterIds.flatMap((id) => characterRows.filter((r) => r.characterId === id)
-      .map((r) => ({ kind: "character" as const, characterId: id, imageId: r.imageId, situation: r.situation, secret: r.secret }))),
-  ];
-}
 
 // scene の icon / image に入っている aid を URL に引き直す表 (本体の Chat#scene_images)。
 // 説明が付いた絵は AI が選べるので全部、導入で作者が名指しした絵は説明が無くても混ぜる

@@ -16,6 +16,7 @@ import { knownTexts, trim } from "./replay-trimmer";
 import { isPresent } from "./ruby-text";
 import { type SceneEntry, type SceneEvent, ScenePresenter } from "./scene-presenter";
 import type { Emit } from "./sse";
+import { summarize } from "./summary";
 import { rateText } from "./text-rating";
 import { variantsOf } from "./variants";
 
@@ -37,7 +38,8 @@ const STATUS_VALUES: Record<Status, number> = {
   normal: MESSAGE_STATUSES.normal, failed: MESSAGE_STATUSES.failed, canceled: MESSAGE_STATUSES.canceled,
 };
 
-export type RunDeps = { db: Db; env: Bindings; ownerName: string };
+// waitUntil: 章の要約のように、done を送ったあとに続ける処理を載せる
+export type RunDeps = { db: Db; env: Bindings; ownerName: string; waitUntil: (promise: Promise<unknown>) => void };
 
 // message はすでに pending から streaming に切り替えてある (このリクエストが生成を受け持つ)
 export async function runGeneration(deps: RunDeps, chat: Chat, plot: Plot, message: ChatMessage, emit: Emit): Promise<void> {
@@ -267,8 +269,9 @@ class Generation {
       .filter((c): c is Record<string, unknown> => typeof c === "object" && c !== null && !Array.isArray(c))
       .map((c) => (c.key === null || c.key === undefined ? "" : String(c.key)));
     if (chapterKeys.length === 0) {
+      // 章が無いとコンテキストが青天井に伸びるので、古いぶんを要約に畳む
       if ((await promptMessages(db, this.chat)).length > ROLLING_TRIGGER_MESSAGES) {
-        // TODO: ローリング要約 (本体の ChapterSummaryJob の "rolling") を移す
+        this.deps.waitUntil(summarize(this.deps, this.chat.id, null, "rolling"));
       }
       return;
     }
@@ -287,7 +290,7 @@ class Generation {
       const index = chapterKeys.indexOf(closingKey);
       await db.update(chats).set({ currentChapterKey: index < 0 ? "" : (chapterKeys[index + 1] ?? ""), turnsInChapter: 0 })
         .where(eq(chats.id, this.chat.id));
-      // TODO: 章の要約 (本体の ChapterSummaryJob の "chapter") を移す
+      this.deps.waitUntil(summarize(this.deps, this.chat.id, closingKey, "chapter"));
     }
   }
 }
