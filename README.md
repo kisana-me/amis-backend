@@ -18,7 +18,7 @@ Amis (AI キャラクターチャットサービス) のバックエンド。Ami
 - Amis は **恒久的に別サービス** にする。専用の Workers と D1 を持つ
 - 本体の **DM AI 機能は廃止** する。AI 系のテーブルとコード (`ai_models` / `ai_usages` / `ai_daily_quotas` / `ai_agents` / `AiClient` / `AiQuotaService`) はすべて Amis の持ち物になり、本体からは消える
 - **通報は Amis 側** で持つ
-- 既存の **体験版ゲストは切り捨てる** (移行時に引き継がない)
+- **体験版ゲスト・結末 (エンディング)・コインは廃止** する。フロントとの食い違いは `amiverse-docs` の `amis-workers.md` にまとめてある
 - 本体の Account とセッションは **Hyperdrive で都度読むだけ** (D1 に写しは持たない)
 - Amis では **コインを使わない**。利用の制限は週の原価上限とレート制限だけ
 - 画像と OG 画像は **Amis 内で完結** させる (R2 は本体と同じバケットの `amis/` 配下)

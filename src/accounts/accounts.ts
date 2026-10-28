@@ -1,6 +1,7 @@
 // 本体の accounts を Hyperdrive で読む。D1 には写しを持たず、必要なときに都度引く
-import type { Bindings } from "../env";
+import { RATINGS } from "../db/schema";
 import type { MainDb } from "../lib/main-db";
+import { objectUrl, staticImageUrl, type UrlEnv } from "../lib/urls";
 
 export type Account = {
   id: number;
@@ -33,8 +34,6 @@ export type AccountRow = {
   icon_rating: number | null;
 };
 
-type UrlEnv = Pick<Bindings, "S3_PUBLIC_ENDPOINT" | "BACK_URL">;
-
 // アカウントとアイコンの列。プレースホルダの 1 つ目は必ず「今」(adult の判定に使う)。
 // DATETIME の比較は NOW() ではなくこちらから渡す (DB サーバーのタイムゾーンに左右されないように)
 export const ACCOUNT_COLUMNS = `
@@ -44,8 +43,6 @@ export const ACCOUNT_COLUMNS = `
   i.aid AS icon_aid, i.status AS icon_status, i.variant_type AS icon_variant_type, i.rating AS icon_rating`;
 
 export const ACCOUNT_ICON_JOIN = "LEFT JOIN images i ON i.id = a.icon_id";
-
-const RATING_REJECTED = 3;
 
 export function toAccount(row: AccountRow, env: UrlEnv): Account {
   return {
@@ -91,14 +88,9 @@ export function authorJson(account: Account | undefined | null) {
 // 本体の Account#icon_url と Image#image_url と同じ判定。
 // アイコンがなければロゴ、あっても見せられない状態なら Image#image_url の代わりの画像になる
 function iconUrl(row: AccountRow, env: UrlEnv): string {
-  if (row.icon_aid === null) return new URL("/static_assets/images/amiverse-logo.webp", env.BACK_URL).toString();
+  if (row.icon_aid === null) return staticImageUrl(env, "amiverse-logo.webp");
 
-  const usable = row.icon_status === 0 && !!row.icon_variant_type?.trim() && row.icon_rating !== RATING_REJECTED;
-  if (usable) return joinUrl(env.S3_PUBLIC_ENDPOINT, `images/variants/${row.icon_aid}.webp`);
-  return new URL("/static_assets/images/amiverse-1.webp", env.BACK_URL).toString();
-}
-
-// Ruby の File.join と同じく、間の "/" を 1 つにそろえる
-function joinUrl(base: string, path: string): string {
-  return `${base.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
+  const usable = row.icon_status === 0 && !!row.icon_variant_type?.trim() && row.icon_rating !== RATINGS.rejected;
+  if (usable) return objectUrl(env, `images/variants/${row.icon_aid}.webp`);
+  return staticImageUrl(env, "amiverse-1.webp");
 }

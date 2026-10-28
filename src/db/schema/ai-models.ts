@@ -14,7 +14,6 @@ export const aiModels = sqliteTable("ai_models", {
   tier: integer("tier").notNull().default(AI_MODEL_TIERS.free),
   status: integer("status").notNull().default(CONTENT_STATUSES.normal),
   maxRating: integer("max_rating").notNull().default(RATINGS.r18),
-  coinCost: integer("coin_cost").notNull().default(0),
   contextWindow: integer("context_window").notNull().default(0),
   maxOutputTokens: integer("max_output_tokens").notNull().default(0),
   inputPriceMicro: integer("input_price_micro").notNull().default(0),

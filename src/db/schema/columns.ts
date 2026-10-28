@@ -20,17 +20,26 @@ export const aid = () => text("aid", { length: 14 }).notNull();
 export const meta = () => text("meta", { mode: "json" }).$type<Json>().notNull().default({});
 export const jsonValid = (column: string) => check(column, sql`json_valid(${sql.identifier(column)})`);
 
-// user / auto / mod の 3 軸。rating は COALESCE(mod, MAX(user, auto, derived)) の生成カラム。
+// user / auto / mod の 3 軸。rating は COALESCE(mod, MAX(user, auto)) の生成カラム。
 // VIRTUAL なので行には保存されない (インデックスは張れる)
-export const ratings = (withDerived: boolean) => ({
+export const ratings = () => ({
   userRating: integer("user_rating").notNull().default(RATINGS.general),
   autoRating: integer("auto_rating"),
   modRating: integer("mod_rating"),
-  ...(withDerived ? { derivedRating: integer("derived_rating") } : {}),
   rating: integer("rating").generatedAlwaysAs(
-    withDerived
-      ? sql`coalesce(mod_rating, max(user_rating, coalesce(auto_rating, 0), coalesce(derived_rating, 0)))`
-      : sql`coalesce(mod_rating, max(user_rating, coalesce(auto_rating, 0)))`,
+    sql`coalesce(mod_rating, max(user_rating, coalesce(auto_rating, 0)))`,
+    { mode: "virtual" },
+  ),
+});
+
+// 紐づく画像のレーティング (derived_rating) も rating に含めるもの (キャラとプロット)
+export const ratingsWithDerived = () => ({
+  userRating: integer("user_rating").notNull().default(RATINGS.general),
+  autoRating: integer("auto_rating"),
+  modRating: integer("mod_rating"),
+  derivedRating: integer("derived_rating"),
+  rating: integer("rating").generatedAlwaysAs(
+    sql`coalesce(mod_rating, max(user_rating, coalesce(auto_rating, 0), coalesce(derived_rating, 0)))`,
     { mode: "virtual" },
   ),
 });

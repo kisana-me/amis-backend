@@ -19,7 +19,7 @@ export const chats = sqliteTable("chats", {
   choiceMode: integer("choice_mode", { mode: "boolean" }).notNull().default(false),
   currentChapterKey: text("current_chapter_key").notNull().default(""),
   turnsInChapter: integer("turns_in_chapter").notNull().default(0),
-  endingKey: text("ending_key").notNull().default(""),
+  // 最終章のねらいを達成した時刻 (@@cleared)。結末の定義と収集は廃止した
   finishedAt: integer("finished_at", { mode: "timestamp_ms" }),
   summaries: text("summaries", { mode: "json" }).$type<unknown[]>().notNull().default([]),
   messagesCount: integer("messages_count").notNull().default(0),
@@ -29,7 +29,7 @@ export const chats = sqliteTable("chats", {
 }, (t) => [
   uniqueIndex("index_chats_on_aid").on(t.aid),
   index("index_chats_on_account_id_and_last_message_at").on(t.accountId, t.lastMessageAt),
-  index("index_chats_on_plot_id_and_ending_key").on(t.plotId, t.endingKey),
+  index("index_chats_on_plot_id").on(t.plotId),
   index("index_chats_on_persona_id").on(t.personaId),
   index("index_chats_on_ai_model_id").on(t.aiModelId),
   jsonValid("summaries"),

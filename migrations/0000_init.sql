@@ -6,7 +6,7 @@ CREATE TABLE `images` (
 	`description` text DEFAULT '' NOT NULL,
 	`original_key` text,
 	`original_ext` text,
-	`variants` text DEFAULT '[]' NOT NULL,
+	`variant_type` text,
 	`width` integer,
 	`height` integer,
 	`status` integer DEFAULT 0 NOT NULL,
@@ -18,7 +18,6 @@ CREATE TABLE `images` (
 	`meta` text DEFAULT '{}' NOT NULL,
 	`created_at` integer NOT NULL,
 	`updated_at` integer NOT NULL,
-	CONSTRAINT "variants" CHECK(json_valid("variants")),
 	CONSTRAINT "meta" CHECK(json_valid("meta"))
 );
 --> statement-breakpoint
@@ -37,7 +36,6 @@ CREATE TABLE `ai_models` (
 	`tier` integer DEFAULT 0 NOT NULL,
 	`status` integer DEFAULT 0 NOT NULL,
 	`max_rating` integer DEFAULT 2 NOT NULL,
-	`coin_cost` integer DEFAULT 0 NOT NULL,
 	`context_window` integer DEFAULT 0 NOT NULL,
 	`max_output_tokens` integer DEFAULT 0 NOT NULL,
 	`input_price_micro` integer DEFAULT 0 NOT NULL,
@@ -221,7 +219,6 @@ CREATE TABLE `chats` (
 	`choice_mode` integer DEFAULT false NOT NULL,
 	`current_chapter_key` text DEFAULT '' NOT NULL,
 	`turns_in_chapter` integer DEFAULT 0 NOT NULL,
-	`ending_key` text DEFAULT '' NOT NULL,
 	`finished_at` integer,
 	`summaries` text DEFAULT '[]' NOT NULL,
 	`messages_count` integer DEFAULT 0 NOT NULL,
@@ -238,7 +235,7 @@ CREATE TABLE `chats` (
 --> statement-breakpoint
 CREATE UNIQUE INDEX `index_chats_on_aid` ON `chats` (`aid`);--> statement-breakpoint
 CREATE INDEX `index_chats_on_account_id_and_last_message_at` ON `chats` (`account_id`,`last_message_at`);--> statement-breakpoint
-CREATE INDEX `index_chats_on_plot_id_and_ending_key` ON `chats` (`plot_id`,`ending_key`);--> statement-breakpoint
+CREATE INDEX `index_chats_on_plot_id` ON `chats` (`plot_id`);--> statement-breakpoint
 CREATE INDEX `index_chats_on_persona_id` ON `chats` (`persona_id`);--> statement-breakpoint
 CREATE INDEX `index_chats_on_ai_model_id` ON `chats` (`ai_model_id`);--> statement-breakpoint
 CREATE TABLE `chat_messages` (

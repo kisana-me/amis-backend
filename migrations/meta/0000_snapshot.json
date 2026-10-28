@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "cefa9719-a2d4-4f36-9946-b624855d2d08",
+  "id": "7e378b12-56e3-4383-8c01-8760eb30059f",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "images": {
@@ -58,13 +58,12 @@
           "notNull": false,
           "autoincrement": false
         },
-        "variants": {
-          "name": "variants",
+        "variant_type": {
+          "name": "variant_type",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'[]'"
+          "notNull": false,
+          "autoincrement": false
         },
         "width": {
           "name": "width",
@@ -179,10 +178,6 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {
-        "variants": {
-          "name": "variants",
-          "value": "json_valid(\"variants\")"
-        },
         "meta": {
           "name": "meta",
           "value": "json_valid(\"meta\")"
@@ -274,14 +269,6 @@
           "notNull": true,
           "autoincrement": false,
           "default": 2
-        },
-        "coin_cost": {
-          "name": "coin_cost",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
         },
         "context_window": {
           "name": "context_window",
@@ -1596,14 +1583,6 @@
           "autoincrement": false,
           "default": 0
         },
-        "ending_key": {
-          "name": "ending_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "''"
-        },
         "finished_at": {
           "name": "finished_at",
           "type": "integer",
@@ -1673,11 +1652,10 @@
           ],
           "isUnique": false
         },
-        "index_chats_on_plot_id_and_ending_key": {
-          "name": "index_chats_on_plot_id_and_ending_key",
+        "index_chats_on_plot_id": {
+          "name": "index_chats_on_plot_id",
           "columns": [
-            "plot_id",
-            "ending_key"
+            "plot_id"
           ],
           "isUnique": false
         },

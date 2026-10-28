@@ -18,7 +18,7 @@ export const chatMessages = sqliteTable("chat_messages", {
   speakerCharacterId: integer("speaker_character_id").references(() => characters.id),
   replacedById: integer("replaced_by_id"),
   aiModelId: integer("ai_model_id").references(() => aiModels.id, { onDelete: "set null" }),
-  ...ratings(false),
+  ...ratings(),
   streamedAt: integer("streamed_at", { mode: "timestamp_ms" }),
   meta: meta(),
   ...timestamps,

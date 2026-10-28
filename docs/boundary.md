@@ -54,9 +54,7 @@ Rails の CSRF トークンはセッションに結びついていて、Rails �
 
 ### 体験版ゲスト
 
-- Amis が独自に署名した cookie `amis_guest` を発行する。本体の Rails セッション (`_amiverse`) の `amis_guest_id` は使わない
-- ログイン済みのリクエストに `amis_guest` が付いていたら、その場でゲストのチャットをアカウントに引き継ぐ (今は本体の sign_in の直後にやっている `promote_amis_guest` を Amis に移す)
-- 移行の時点で存在するゲストは切り捨てる
+廃止する。Amis を使うにはサインインが必要になる (`amiverse-docs` の `amis-workers.md`)。
 
 ## 3. 画像
 
@@ -65,11 +63,11 @@ Amis の中だけで完結させる。本体の `images` テーブルは使わ�
 ```
 amis_images: id, aid, account_id, status, visibility,
              user_rating, auto_rating, mod_rating, rating (生成カラム),
-             original_key, original_ext, variants (JSON), width, height,
+             original_key, original_ext, variant_type, width, height,
              created_at, updated_at
 R2 (本体と同じバケット):
   amis/images/originals/{aid}.{ext}
-  amis/images/variants/{aid}/{variant}.webp
+  amis/images/variants/{aid}.webp   (本体の images/variants/{aid}.webp と同じ形。variant_type が null なら未変換)
 ```
 
 - アップロード時に Images バインディング (`env.IMAGES.input(...).transform(...).output(...)`) で変換し、R2 に保存する。必要になったときに作る遅延生成も同じ仕組みでできる

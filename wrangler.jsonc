@@ -33,7 +33,9 @@
     // 本体は TZ=Asia/Tokyo かつ default_timezone :local なので、datetime はタイムゾーンなしの JST で入っている
     "MAIN_DB_TIMEZONE": "+09:00",
     // CORS と CSRF (Origin の確認) で許可するフロントのオリジン。本体の FRONT_URL / DEV_FRONT_URL に当たる。カンマ区切り
-    "ALLOWED_ORIGINS": ""
+    "ALLOWED_ORIGINS": "",
+    // 週の原価上限 (マイクロ USD)。全アカウント共通で、0 以下は無制限 (本体の DEFAULT_WEEKLY_COST_LIMIT_MICRO)
+    "WEEKLY_COST_LIMIT_MICRO": "5000000"
   },
   "observability": {
     "logs": {
