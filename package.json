@@ -9,7 +9,9 @@
     "typecheck": "tsc",
     "cf-typegen": "wrangler types",
     "db:generate": "drizzle-kit generate",
-    "db:migrate:local": "wrangler d1 migrations apply amis --local"
+    "db:migrate:local": "wrangler d1 migrations apply amis --local",
+    "db:reset:local": "rm -rf .wrangler/state/v3/d1 && wrangler d1 migrations apply amis --local",
+    "db:import:local": "npm run db:reset:local && node scripts/import-from-main.ts .wrangler/import.sql && wrangler d1 execute amis --local --file .wrangler/import.sql"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.4",
