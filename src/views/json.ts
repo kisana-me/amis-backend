@@ -63,9 +63,36 @@ export function castJson({ plotCharacter, character }: Cast, ctx: ViewContext) {
   };
 }
 
-// 章の定義 (Hash のものだけを数える。本体の Plot#chapter_definitions)
+type Hash = Record<string, unknown>;
+const isHash = (v: unknown): v is Hash => typeof v === "object" && v !== null && !Array.isArray(v);
+const present = (v: unknown) => v !== null && v !== undefined && String(v).trim() !== "";
+
+// 章の定義。Hash のものだけを使う (本体の Plot#chapter_definitions)
+export function chapterDefinitions(plot: Plot): { key: string | null; title: string | null }[] {
+  return plot.chapters.filter(isHash).map((c) => ({
+    key: c.key === undefined || c.key === null ? null : String(c.key),
+    // ActiveModel の既定値と同じく、項目がなければ ""、null が入っていれば null
+    title: c.title === undefined ? "" : c.title === null ? null : String(c.title),
+  }));
+}
+
 export function chapterCount(plot: Plot): number {
-  return plot.chapters.filter((c) => typeof c === "object" && c !== null && !Array.isArray(c)).length;
+  return plot.chapters.filter(isHash).length;
+}
+
+// 導入の行。本文が空の行は落とす。icon が吹き出しの顔、image が地の文に添える挿絵 (本体の Plot#opening_lines)
+export function openingLines(plot: Plot) {
+  return plot.openingScene.filter(isHash).filter((line) => present(line.text)).map((line) => ({
+    speaker: present(line.speaker) ? line.speaker : null,
+    text: String(line.text ?? ""),
+    ...(present(line.icon) ? { icon: line.icon } : {}),
+    ...(present(line.image) ? { image: line.image } : {}),
+  }));
+}
+
+// 導入で名指しされている画像の aid
+export function openingImageAids(plot: Plot): string[] {
+  return [...new Set(openingLines(plot).flatMap((line) => [line.icon, line.image]).filter(present).map(String))];
 }
 
 // 主役。is_lead がいなければ先頭 (本体の Plot#lead_plot_character)

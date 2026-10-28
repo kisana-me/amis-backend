@@ -7,6 +7,7 @@ import { mainDbConnection } from "./middleware/main-db";
 import type { MainDb } from "./lib/main-db";
 import type { Bindings } from "./env";
 import { characterRoutes } from "./routes/characters";
+import { plotRoutes } from "./routes/plots";
 import { statusRoutes } from "./routes/status";
 
 export type AppDeps = {
@@ -33,6 +34,7 @@ export function createApp(deps: AppDeps = {}) {
 
   app.route("/", statusRoutes);
   app.route("/", characterRoutes);
+  app.route("/", plotRoutes);
 
   app.notFound((c) => c.json({ status: "error", message: "見つかりませんでした" }, 404));
 

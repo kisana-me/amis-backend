@@ -49,6 +49,11 @@ function normalizeRails(path: string, json: Json): Json {
       models: (json.models as Record<string, unknown>[] | undefined)?.map(({ coin_cost: _c, ...m }) => m),
     };
   }
+  // 結末 (エンディング) は廃止
+  if (/^\/plots\/[^/]+$/.test(path) && isObject(json) && isObject(json.plot)) {
+    const { endings: _e, collected_count: _c, ...plot } = json.plot;
+    return { ...json, plot };
+  }
   return json;
 }
 
@@ -93,6 +98,8 @@ const workerHeaders: Record<string, string> = TOKEN ? { Authorization: `Bearer $
 async function defaultTargets(): Promise<[string, Json][]> {
   const characters = await post(RAILS, "/characters", {}, railsHeaders);
   const aids = isObject(characters.json) ? (characters.json.characters as { aid: string }[]).map((c) => c.aid) : [];
+  const plotList = await post(RAILS, "/plots", {}, railsHeaders);
+  const plotAids2 = isObject(plotList.json) ? (plotList.json.plots as { aid: string }[]).map((p) => p.aid) : [];
   // キャラの詳細に出てくるプロットで、/status のモデルの選び方も比べる
   const plotAids = new Set<string>();
   for (const aid of aids) {
@@ -104,6 +111,8 @@ async function defaultTargets(): Promise<[string, Json][]> {
     ...[...plotAids].map((aid): [string, Json] => ["/status", { plot_aid: aid }]),
     ["/characters", {}],
     ...aids.map((aid): [string, Json] => [`/characters/${aid}`, {}]),
+    ["/plots", {}],
+    ...plotAids2.map((aid): [string, Json] => [`/plots/${aid}`, {}]),
   ];
 }
 

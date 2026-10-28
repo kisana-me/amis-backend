@@ -28,10 +28,11 @@ export type Loaders = { db: Db; mainDb: MainDb; env: UrlEnv; viewer: Viewer };
 
 export async function loadContext(
   { db, mainDb, env, viewer }: Loaders,
-  input: { plots?: Plot[]; characters?: Character[]; imageIds?: number[] },
+  // casts は先に loadCasts で引いてあれば渡す (出演者の絵を探すときなど)
+  input: { plots?: Plot[]; characters?: Character[]; imageIds?: number[]; casts?: Map<number, Cast[]> },
 ): Promise<ViewContext> {
   const plotList = input.plots ?? [];
-  const casts = await loadCasts(db, plotList);
+  const casts = input.casts ?? (await loadCasts(db, plotList));
   const characterList = [...(input.characters ?? []), ...[...casts.values()].flat().map((c) => c.character)];
 
   const imageIds = [
@@ -57,7 +58,7 @@ export async function loadContext(
 }
 
 // 出演者は、キャラの状態に関わらずすべて返す (本体の plot.plot_characters と同じ)
-async function loadCasts(db: Db, plotList: Plot[]): Promise<Map<number, Cast[]>> {
+export async function loadCasts(db: Db, plotList: Plot[]): Promise<Map<number, Cast[]>> {
   const casts = new Map<number, Cast[]>();
   if (plotList.length === 0) return casts;
 
