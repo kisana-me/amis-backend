@@ -2,12 +2,15 @@ import type { CurrentAccount, CurrentSession } from "./auth/current-account";
 import type { Db } from "./db/client";
 import type { AiEnv } from "./generation/ai-client";
 import type { MainDb } from "./lib/main-db";
+import type { ImageProcessor } from "./media/images";
 
 // API キーと AI Gateway の設定 (AiEnv) は secret で渡す
 export type Bindings = AiEnv & {
   DB: D1Database;
   HYPERDRIVE: Hyperdrive;
   SEND_LIMITER: RateLimit;
+  MEDIA: R2Bucket;
+  IMAGES: ImagesBinding;
   S3_PUBLIC_ENDPOINT: string;
   BACK_URL: string;
   MAIN_DB_TIMEZONE: string;
@@ -22,6 +25,7 @@ export type AppEnv = {
   Variables: {
     db: Db;
     mainDb: MainDb;
+    imageProcessor: ImageProcessor;
     currentAccount: CurrentAccount | null;
     currentSession: CurrentSession | null;
   };

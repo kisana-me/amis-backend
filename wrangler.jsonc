@@ -26,6 +26,12 @@
       "localConnectionString": "mysql://root:mdbroot@127.0.0.1:3306/amiverse_development"
     }
   ],
+  // 画像は本体と同じバケットの amis/ の下に置く (amis/images/variants/{aid}.webp)
+  "r2_buckets": [
+    { "binding": "MEDIA", "bucket_name": "amiverse" }
+  ],
+  // アップロードされた画像の切り抜き・縮小・WebP への変換
+  "images": { "binding": "IMAGES" },
   // 1 分あたり 10 通まで (本体の RATE_LIMIT_PER_MINUTE)。アカウントごとに数える
   "ratelimits": [
     { "name": "SEND_LIMITER", "namespace_id": "1001", "simple": { "limit": 10, "period": 60 } }

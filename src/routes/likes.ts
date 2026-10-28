@@ -1,10 +1,11 @@
 // いいねの一覧 (本体の V1::Amis::LikesController#index)。
 // 見られなくなったものも行としては残し、一覧からいいねを外せるようにする
-import { and, desc, eq, inArray, lt, or, type SQL } from "drizzle-orm";
+import { and, desc, eq, inArray, lt, ne, or, type SQL, sql } from "drizzle-orm";
+import type { Context } from "hono";
 import { Hono } from "hono";
 import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 import { inChunks } from "../db/client";
-import { CONTENT_STATUSES, characterLikes, characters, plotLikes, plots } from "../db/schema";
+import { CONTENT_STATUSES, characterLikes, characters, plotLikes, plots, VISIBILITIES } from "../db/schema";
 import type { AppEnv } from "../env";
 import { jsonBody } from "../lib/http";
 import { maxRatingFor } from "../lib/ratings";
@@ -95,3 +96,55 @@ likeRoutes.post("/my/likes/characters", requireSignin, async (c) => {
 });
 
 const cursorOf = (at: Date, targetId: number) => `${at.getTime()}.${targetId}`;
+
+// いいねを付ける・外す (本体の LikesController#create / #destroy)。
+// 付けられるのは正常で非公開でないもの。外すほうは見られなくなった対象でもできるよう、状態で絞らない。
+// いいね数は足し引きせず数え直す (二度押しで重複しても数が狂わないように)
+for (const kind of ["plots", "characters"] as const) {
+  const isPlot = kind === "plots";
+  const table = isPlot ? plots : characters;
+  const notFoundMessage = isPlot ? "プロットが見つかりませんでした" : "キャラが見つかりませんでした";
+
+  const respond = async (c: Context<AppEnv>, targetId: number, liked: boolean) => {
+    const [row] = await c.var.db.select({ likesCount: table.likesCount }).from(table).where(eq(table.id, targetId)).limit(1);
+    return c.json({ status: "success", liked, likes_count: row?.likesCount ?? 0 });
+  };
+
+  likeRoutes.post(`/${kind}/:aid/like`, requireSignin, async (c) => {
+    const { db } = c.var;
+    const [target] = await db.select({ id: table.id }).from(table)
+      .where(and(eq(table.aid, c.req.param("aid")), eq(table.status, CONTENT_STATUSES.normal), ne(table.visibility, VISIBILITIES.closed))).limit(1);
+    if (!target) return c.json({ status: "error", message: notFoundMessage }, 404);
+
+    const accountId = c.var.currentAccount!.id;
+    await db.batch([
+      isPlot
+        ? db.insert(plotLikes).values({ accountId, plotId: target.id }).onConflictDoNothing()
+        : db.insert(characterLikes).values({ accountId, characterId: target.id }).onConflictDoNothing(),
+      recount(db, isPlot, target.id),
+    ]);
+    return respond(c, target.id, true);
+  });
+
+  likeRoutes.delete(`/${kind}/:aid/like`, requireSignin, async (c) => {
+    const { db } = c.var;
+    const [target] = await db.select({ id: table.id }).from(table).where(eq(table.aid, c.req.param("aid"))).limit(1);
+    if (!target) return c.json({ status: "error", message: notFoundMessage }, 404);
+
+    const accountId = c.var.currentAccount!.id;
+    await db.batch([
+      isPlot
+        ? db.delete(plotLikes).where(and(eq(plotLikes.accountId, accountId), eq(plotLikes.plotId, target.id)))
+        : db.delete(characterLikes).where(and(eq(characterLikes.accountId, accountId), eq(characterLikes.characterId, target.id))),
+      recount(db, isPlot, target.id),
+    ]);
+    return respond(c, target.id, false);
+  });
+
+}
+
+function recount(db: AppEnv["Variables"]["db"], isPlot: boolean, id: number) {
+  return isPlot
+    ? db.update(plots).set({ likesCount: sql`(SELECT COUNT(*) FROM ${plotLikes} WHERE ${plotLikes.plotId} = ${id})` }).where(eq(plots.id, id))
+    : db.update(characters).set({ likesCount: sql`(SELECT COUNT(*) FROM ${characterLikes} WHERE ${characterLikes.characterId} = ${id})` }).where(eq(characters.id, id));
+}

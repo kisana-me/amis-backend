@@ -92,7 +92,7 @@ plotRoutes.post("/plots/:aid/edit", requireSignin, async (c) => {
 });
 
 // 本体の plots#show。一覧に出ないものでも作者本人には見せる。結末 (endings) は廃止した
-plotRoutes.post("/plots/:aid", async (c) => {
+plotRoutes.post("/plots/:aid{[a-z0-9]{14}}", async (c) => {
   const { db } = c.var;
   const account = c.var.currentAccount;
   const plot = await findVisiblePlot(db, c.req.param("aid"), maxRatingFor(account), account);

@@ -5,6 +5,7 @@ import { corsPolicy, originCheck } from "./middleware/cors";
 import { d1Connection } from "./middleware/db";
 import { mainDbConnection } from "./middleware/main-db";
 import type { MainDb } from "./lib/main-db";
+import { type ImageProcessor, imagesBindingProcessor } from "./media/images";
 import type { Bindings } from "./env";
 import { characterRoutes } from "./routes/characters";
 import { plotRoutes } from "./routes/plots";
@@ -21,6 +22,8 @@ import { statusRoutes } from "./routes/status";
 export type AppDeps = {
   // テストで本体の DB を差し替える
   mainDb?: (env: Bindings) => MainDb;
+  // テストで画像の変換 (Images バインディング) を差し替える
+  imageProcessor?: ImageProcessor;
   sessionSource?: SessionSource;
 };
 
@@ -38,6 +41,11 @@ export function createApp(deps: AppDeps = {}) {
       status: "success",
       account: { aid: account.aid, name: account.name, name_id: account.nameId, icon_url: account.iconUrl },
     });
+  });
+
+  app.use(async (c, next) => {
+    c.set("imageProcessor", deps.imageProcessor ?? imagesBindingProcessor(c.env.IMAGES));
+    await next();
   });
 
   app.route("/", statusRoutes);

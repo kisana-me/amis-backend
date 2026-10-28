@@ -1,5 +1,6 @@
 import { and, asc, count, desc, eq, inArray, ne } from "drizzle-orm";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
+import { saveCharacter } from "../writers/character";
 import { CONTENT_STATUSES, characterImages, characterLikes, characters, plotCharacters, plots } from "../db/schema";
 import type { AppEnv } from "../env";
 import { jsonBody, notFound } from "../lib/http";
@@ -50,18 +51,54 @@ characterRoutes.post("/characters/selectable", requireSignin, async (c) => {
 
 // 編集用。persona_public に関わらず定義まで返す (本体の characters#edit)
 characterRoutes.post("/characters/:aid/edit", requireSignin, async (c) => {
-  const viewer = c.var.currentAccount!;
-  const [character] = await c.var.db.select().from(characters)
-    .where(and(eq(characters.aid, c.req.param("aid")), ownCharacters(viewer.id))).limit(1);
+  const character = await findOwnCharacter(c, c.req.param("aid"));
   if (!character) return notFound(c, "キャラが見つかりませんでした");
-
-  const owned = await characterImagesOf(c.var.db, [character.id]);
-  const ctx = await loadContext(loadersOf(c), { characters: [character], imageIds: imageIdsOf(owned.values()) });
-  return c.json({ status: "success", character: editableCharacterJson(character, ctx, viewer.id, owned.get(character.id) ?? []) });
+  return c.json(await characterEditJson(c, character));
 });
 
+const MAX_CHARACTERS = 50;
+
+characterRoutes.post("/characters/create", requireSignin, async (c) => {
+  const [{ n }] = await c.var.db.select({ n: count() }).from(characters).where(ownCharacters(c.var.currentAccount!.id));
+  if (n >= MAX_CHARACTERS) return c.json({ status: "error", message: `キャラは${MAX_CHARACTERS}体までです` }, 422);
+
+  const result = await saveCharacter(c, null);
+  if (!result.ok) return c.json({ status: "error", message: result.message }, 422);
+  return c.json(await characterEditJson(c, (await findOwnCharacter(c, result.aid))!));
+});
+
+characterRoutes.patch("/characters/:aid", requireSignin, async (c) => {
+  const character = await findOwnCharacter(c, c.req.param("aid"));
+  if (!character) return notFound(c, "キャラが見つかりませんでした");
+
+  const result = await saveCharacter(c, character);
+  if (!result.ok) return c.json({ status: "error", message: result.message }, 422);
+  return c.json(await characterEditJson(c, (await findOwnCharacter(c, result.aid))!));
+});
+
+// プロットと同じくソフトデリート。出演していたプロットからは消えるが、すでに始まっているチャットはそのまま続けられる
+characterRoutes.delete("/characters/:aid", requireSignin, async (c) => {
+  const character = await findOwnCharacter(c, c.req.param("aid"));
+  if (!character) return notFound(c, "キャラが見つかりませんでした");
+  await c.var.db.update(characters).set({ status: CONTENT_STATUSES.deleted }).where(eq(characters.id, character.id));
+  return c.json({ status: "success" });
+});
+
+async function findOwnCharacter(c: Context<AppEnv>, aid: string): Promise<Character | null> {
+  const [character] = await c.var.db.select().from(characters)
+    .where(and(eq(characters.aid, aid), ownCharacters(c.var.currentAccount!.id))).limit(1);
+  return character ?? null;
+}
+
+// characters/edit.json.jbuilder
+async function characterEditJson(c: Context<AppEnv>, character: Character) {
+  const owned = await characterImagesOf(c.var.db, [character.id]);
+  const ctx = await loadContext(loadersOf(c), { characters: [character], imageIds: imageIdsOf(owned.values()) });
+  return { status: "success", character: editableCharacterJson(character, ctx, c.var.currentAccount!.id, owned.get(character.id) ?? []) };
+}
+
 // 本体の characters#show。一覧に出ないものでも作者本人には見せる
-characterRoutes.post("/characters/:aid", async (c) => {
+characterRoutes.post("/characters/:aid{[a-z0-9]{14}}", async (c) => {
   const { db } = c.var;
   const account = c.var.currentAccount;
   const maxRating = maxRatingFor(account);
