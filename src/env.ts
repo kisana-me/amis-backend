@@ -7,6 +7,8 @@ export type Bindings = {
   S3_PUBLIC_ENDPOINT: string;
   BACK_URL: string;
   MAIN_DB_TIMEZONE: string;
+  // CORS と CSRF (Origin の確認) で許可するフロントのオリジン。カンマ区切り
+  ALLOWED_ORIGINS: string;
 };
 
 export type AppEnv = {

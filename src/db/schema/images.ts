@@ -1,5 +1,4 @@
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
-import { accounts } from "./accounts";
 import { aid, jsonValid, meta, ratings, timestamps } from "./columns";
 import { CONTENT_STATUSES, VISIBILITIES } from "./enums";
 
@@ -8,7 +7,7 @@ import { CONTENT_STATUSES, VISIBILITIES } from "./enums";
 export const images = sqliteTable("images", {
   id: integer("id").primaryKey(),
   aid: aid(),
-  accountId: integer("account_id").references(() => accounts.id),
+  accountId: integer("account_id"),
   name: text("name").notNull().default(""),
   description: text("description").notNull().default(""),
   originalKey: text("original_key"),

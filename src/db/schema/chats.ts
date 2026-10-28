@@ -1,5 +1,4 @@
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
-import { accounts } from "./accounts";
 import { aiModels } from "./ai-models";
 import { aid, jsonValid, meta, timestamps } from "./columns";
 import { CHAT_STATUSES, REPLY_STYLES } from "./enums";
@@ -10,7 +9,7 @@ import { plots } from "./plots";
 export const chats = sqliteTable("chats", {
   id: integer("id").primaryKey(),
   aid: aid(),
-  accountId: integer("account_id").notNull().references(() => accounts.id),
+  accountId: integer("account_id").notNull(),
   plotId: integer("plot_id").notNull().references(() => plots.id),
   personaId: integer("persona_id").references(() => personas.id),
   aiModelId: integer("ai_model_id").references(() => aiModels.id, { onDelete: "set null" }),

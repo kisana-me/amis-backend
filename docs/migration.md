@@ -20,15 +20,14 @@
 
 ### 2. Amis Worker を作る (このリポジトリ)
 
-- D1 のスキーマ: 本体の `schema.rb` の `amis_*` を SQLite 向けに書き直したものに、`amis_accounts` / `amis_account_settings` / `amis_images` / `amis_ai_models` / `amis_ai_usages` / `amis_daily_quotas` / `amis_reports` / `amis_moderation_results` を足す
+- D1 のスキーマ: 本体の `schema.rb` の `amis_*` と `ai_models` / `ai_usages` を SQLite 向けに書き直し、`images` / `reports` / `moderation_results` を足す (テーブル名から `amis_` は外す。アカウントの写しは持たない)
 - `/v1/amis/*` の全エンドポイントを、今のレスポンスの形のまま (フロントの変更を最小にするため) 実装する
 - DO による生成と SSE、Queues、Cron、画像、OG、通報、管理画面
 
 ### 3. 本体に internal API とイベント送信を足す
 
-- `/internal/coins/{spend,refund,balance}` と、`coin_transactions.idempotency_key`
 - `/internal/notifications` と、`notifications` の外部通知用カラム
-- アカウントの状態変更と purge のときに、Amis の Queue へイベントを送る
+- アカウントの purge のときに、Amis へイベントを送る
 
 ### 4. フロントを対応させる
 
@@ -42,8 +41,7 @@
 2. 本番の切り替え
    1. Amis を書き込み停止にする (メンテナンス表示)
    2. `amis_*` と AI 系のテーブルを D1 に流し込む。画像は `images` から `amis_images` に移し、R2 のオブジェクトを `amis/` 配下にコピーする
-   3. `amis_accounts` を本体の `accounts` から作る
-   4. Gateway で `/v1/amis/*` と `/og/amis/*` の振り分け先を Amis Worker に切り替える
+   3. Gateway で `/v1/amis/*` と `/og/amis/*` の振り分け先を Amis Worker に切り替える
 3. しばらく様子を見て問題がなければ、本体から Amis 関連のコードとテーブルを消す (下の一覧)
 
 切り戻しが必要になったら、Gateway の振り分けを Rails に戻す。D1 に移ったあとの書き込みは Rails に戻らないので、切り替えの判断は書き込み停止中に済ませる。

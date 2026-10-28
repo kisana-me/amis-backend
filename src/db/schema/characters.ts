@@ -1,5 +1,4 @@
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
-import { accounts } from "./accounts";
 import { aid, jsonValid, meta, ratings, timestamps } from "./columns";
 import { CONTENT_STATUSES, VISIBILITIES } from "./enums";
 import { images } from "./images";
@@ -7,7 +6,7 @@ import { images } from "./images";
 export const characters = sqliteTable("characters", {
   id: integer("id").primaryKey(),
   aid: aid(),
-  authorId: integer("author_id").references(() => accounts.id),
+  authorId: integer("author_id"),
   iconId: integer("icon_id").references(() => images.id),
   name: text("name").notNull(),
   tagline: text("tagline").notNull().default(""),

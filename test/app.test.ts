@@ -42,3 +42,47 @@ describe("認証", () => {
     expect(await res.json()).toEqual({ status: "success" });
   });
 });
+
+describe("CORS と Origin の確認", () => {
+  it("許可したオリジンのプリフライトには credentials 付きで答える", async () => {
+    const app = await appWith("goodtoken");
+    const res = await app.request("/v1/amis/health", {
+      method: "OPTIONS",
+      headers: { Origin: "http://localhost:3000", "Access-Control-Request-Method": "POST" },
+    }, env, ctx);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("http://localhost:3000");
+    expect(res.headers.get("Access-Control-Allow-Credentials")).toBe("true");
+  });
+
+  it("許可していないオリジンには Allow-Origin を返さない", async () => {
+    const app = await appWith("goodtoken");
+    const res = await app.request("/v1/amis/health", { headers: { Origin: "https://evil.example.test" } }, env, ctx);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+  });
+
+  it("Cookie 付きの POST は、Origin が許可したものでなければ 403", async () => {
+    const app = await appWith("goodtoken");
+    for (const headers of [
+      { Cookie: "amiverse=goodtoken" },
+      { Cookie: "amiverse=goodtoken", Origin: "https://evil.example.test" },
+    ] as Record<string, string>[]) {
+      const res = await app.request("/v1/amis/health", { method: "POST", headers }, env, ctx);
+      expect(res.status).toBe(403);
+    }
+  });
+
+  it("Cookie 付きの POST でも、許可したオリジンなら通る", async () => {
+    const app = await appWith("goodtoken");
+    const res = await app.request("/v1/amis/session", {
+      method: "POST", headers: { Cookie: "amiverse=goodtoken", Origin: "https://front.example.test" },
+    }, env, ctx);
+    // /session は GET だけなので 404。403 で止まっていないことを見る
+    expect(res.status).toBe(404);
+  });
+
+  it("Cookie を持たない Bearer の POST は Origin を見ない", async () => {
+    const app = await appWith("goodtoken");
+    const res = await app.request("/v1/amis/session", { method: "POST", headers: { Authorization: "Bearer goodtoken" } }, env, ctx);
+    expect(res.status).toBe(404);
+  });
+});

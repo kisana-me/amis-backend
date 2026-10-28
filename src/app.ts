@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "./env";
 import { currentAccount, requireSignin, type SessionSource } from "./middleware/auth";
+import { corsPolicy, originCheck } from "./middleware/cors";
 import { mainDbConnection } from "./middleware/main-db";
 
 export type AppDeps = {
@@ -11,7 +12,7 @@ export type AppDeps = {
 export function createApp(deps: AppDeps = {}) {
   const app = new Hono<AppEnv>().basePath("/v1/amis");
 
-  app.use(mainDbConnection, currentAccount(deps.sessionSource));
+  app.use(corsPolicy, originCheck, mainDbConnection, currentAccount(deps.sessionSource));
 
   app.get("/health", (c) => c.json({ status: "success" }));
 

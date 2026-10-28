@@ -1,137 +1,9 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "6d9ffe9e-4c61-4854-bd82-41575de86355",
+  "id": "cefa9719-a2d4-4f36-9946-b624855d2d08",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
-    "accounts": {
-      "name": "accounts",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "aid": {
-          "name": "aid",
-          "type": "text(14)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "name_id": {
-          "name": "name_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "icon_url": {
-          "name": "icon_url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "status": {
-          "name": "status",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "visibility": {
-          "name": "visibility",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "adult": {
-          "name": "adult",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
-        },
-        "synced_at": {
-          "name": "synced_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "bonus_remaining": {
-          "name": "bonus_remaining",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "bonus_granted_at": {
-          "name": "bonus_granted_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "weekly_cost_limit_micro": {
-          "name": "weekly_cost_limit_micro",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "index_accounts_on_aid": {
-          "name": "index_accounts_on_aid",
-          "columns": [
-            "aid"
-          ],
-          "isUnique": true
-        },
-        "index_accounts_on_name_id": {
-          "name": "index_accounts_on_name_id",
-          "columns": [
-            "name_id"
-          ],
-          "isUnique": true
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "images": {
       "name": "images",
       "columns": {
@@ -303,21 +175,7 @@
           "isUnique": false
         }
       },
-      "foreignKeys": {
-        "images_account_id_accounts_id_fk": {
-          "name": "images_account_id_accounts_id_fk",
-          "tableFrom": "images",
-          "tableTo": "accounts",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
+      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {
@@ -683,19 +541,6 @@
         }
       },
       "foreignKeys": {
-        "ai_usages_account_id_accounts_id_fk": {
-          "name": "ai_usages_account_id_accounts_id_fk",
-          "tableFrom": "ai_usages",
-          "tableTo": "accounts",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
         "ai_usages_ai_model_id_ai_models_id_fk": {
           "name": "ai_usages_ai_model_id_ai_models_id_fk",
           "tableFrom": "ai_usages",
@@ -737,67 +582,6 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "daily_quotas": {
-      "name": "daily_quotas",
-      "columns": {
-        "account_id": {
-          "name": "account_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "used_on": {
-          "name": "used_on",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "used_count": {
-          "name": "used_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "daily_quotas_account_id_accounts_id_fk": {
-          "name": "daily_quotas_account_id_accounts_id_fk",
-          "tableFrom": "daily_quotas",
-          "tableTo": "accounts",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "daily_quotas_account_id_used_on_pk": {
-          "columns": [
-            "account_id",
-            "used_on"
-          ],
-          "name": "daily_quotas_account_id_used_on_pk"
-        }
-      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
@@ -1037,19 +821,6 @@
         }
       },
       "foreignKeys": {
-        "characters_author_id_accounts_id_fk": {
-          "name": "characters_author_id_accounts_id_fk",
-          "tableFrom": "characters",
-          "tableTo": "accounts",
-          "columnsFrom": [
-            "author_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
         "characters_icon_id_images_id_fk": {
           "name": "characters_icon_id_images_id_fk",
           "tableFrom": "characters",
@@ -1324,19 +1095,6 @@
         }
       },
       "foreignKeys": {
-        "plots_author_id_accounts_id_fk": {
-          "name": "plots_author_id_accounts_id_fk",
-          "tableFrom": "plots",
-          "tableTo": "accounts",
-          "columnsFrom": [
-            "author_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
         "plots_icon_id_images_id_fk": {
           "name": "plots_icon_id_images_id_fk",
           "tableFrom": "plots",
@@ -1494,21 +1252,7 @@
           "isUnique": false
         }
       },
-      "foreignKeys": {
-        "lores_author_id_accounts_id_fk": {
-          "name": "lores_author_id_accounts_id_fk",
-          "tableFrom": "lores",
-          "tableTo": "accounts",
-          "columnsFrom": [
-            "author_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
+      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {
@@ -1723,19 +1467,6 @@
         }
       },
       "foreignKeys": {
-        "personas_account_id_accounts_id_fk": {
-          "name": "personas_account_id_accounts_id_fk",
-          "tableFrom": "personas",
-          "tableTo": "accounts",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
         "personas_plot_id_plots_id_fk": {
           "name": "personas_plot_id_plots_id_fk",
           "tableFrom": "personas",
@@ -1966,19 +1697,6 @@
         }
       },
       "foreignKeys": {
-        "chats_account_id_accounts_id_fk": {
-          "name": "chats_account_id_accounts_id_fk",
-          "tableFrom": "chats",
-          "tableTo": "accounts",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
         "chats_plot_id_plots_id_fk": {
           "name": "chats_plot_id_plots_id_fk",
           "tableFrom": "chats",
@@ -2412,19 +2130,6 @@
         }
       },
       "foreignKeys": {
-        "character_likes_account_id_accounts_id_fk": {
-          "name": "character_likes_account_id_accounts_id_fk",
-          "tableFrom": "character_likes",
-          "tableTo": "accounts",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
         "character_likes_character_id_characters_id_fk": {
           "name": "character_likes_character_id_characters_id_fk",
           "tableFrom": "character_likes",
@@ -2736,19 +2441,6 @@
         }
       },
       "foreignKeys": {
-        "plot_likes_account_id_accounts_id_fk": {
-          "name": "plot_likes_account_id_accounts_id_fk",
-          "tableFrom": "plot_likes",
-          "tableTo": "accounts",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
         "plot_likes_plot_id_plots_id_fk": {
           "name": "plot_likes_plot_id_plots_id_fk",
           "tableFrom": "plot_likes",

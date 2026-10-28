@@ -1,7 +1,6 @@
 // 中間テーブル。作って消すだけのもの (いいね・ロアの紐付け) は id を持たず複合主キーにする。
 // どれも updated_at は持たない
 import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
-import { accounts } from "./accounts";
 import { characters } from "./characters";
 import { createdAt } from "./columns";
 import { images } from "./images";
@@ -65,7 +64,7 @@ export const plotLores = sqliteTable("plot_lores", {
 
 // 「自分のいいね一覧」は (account_id, created_at) で新しい順に並べる
 export const characterLikes = sqliteTable("character_likes", {
-  accountId: integer("account_id").notNull().references(() => accounts.id),
+  accountId: integer("account_id").notNull(),
   characterId: integer("character_id").notNull().references(() => characters.id),
   createdAt: createdAt(),
 }, (t) => [
@@ -75,7 +74,7 @@ export const characterLikes = sqliteTable("character_likes", {
 ]);
 
 export const plotLikes = sqliteTable("plot_likes", {
-  accountId: integer("account_id").notNull().references(() => accounts.id),
+  accountId: integer("account_id").notNull(),
   plotId: integer("plot_id").notNull().references(() => plots.id),
   createdAt: createdAt(),
 }, (t) => [

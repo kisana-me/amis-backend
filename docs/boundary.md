@@ -4,11 +4,10 @@
 
 | 対象 | 持ち主 | Amis からの扱い方 |
 |---|---|---|
-| アカウント (`accounts`) | 本体 | Hyperdrive で読む + D1 に写し (`amis_accounts`) を持つ |
+| アカウント (`accounts`) | 本体 | Hyperdrive で都度読む (D1 に写しは持たない) |
 | セッション (`sessions`) | 本体 | Hyperdrive で読み、Amis の中で検証する |
-| コイン (`accounts.coin_balance` / `coin_transactions`) | 本体 | internal API |
 | 通知 (`notifications` / Web Push) | 本体 | internal API |
-| 無料枠・ボーナス・週の原価上限・レート制限 | Amis | D1 / Rate Limiting |
+| 週の原価上限・レート制限 | Amis | D1 / Rate Limiting |
 | AI モデル・利用記録 | Amis | D1 |
 | 画像 | Amis | D1 (`amis_images`) + R2 (`amis/`) + Images |
 | 通報・モデレーション | Amis | D1 + 管理画面 |
@@ -16,31 +15,15 @@
 
 ## 1. アカウント
 
-### 読み方
+**D1 には写しを持たない。** 必要なときに毎回 Hyperdrive で本体の `accounts` を読む (`src/accounts/accounts.ts`)。
 
-- **認証と詳細表示:** 毎回 Hyperdrive で `accounts` を読む。主キーで引くので軽い
-- **一覧 (プロット一覧、キャラ一覧、ホームなど):** D1 から取ったあとで「作者が削除済みのものを除く」とすると、1 ページの件数がずれる (D1 と MySQL は JOIN できない)。そこで D1 に本体アカウントの写し `amis_accounts` を持ち、一覧は D1 だけで絞り込む
+- **認証:** セッションと一緒に JOIN で取る (下の「認証」)
+- **一覧の作者表示 (プロット一覧、キャラ一覧、ホームなど):** 1 ページ分の `author_id` をまとめて `WHERE id IN (...)` で 1 本引く (`findAccountsByIds`)
+- **アカウントのページ (`/amis/accounts/@:name_id`):** `name_id` で引く (`findAccountByNameId`)
 
-### `amis_accounts` (本体アカウントの写し)
+一覧は、本体と同じく**作者のアカウントの状態では絞り込まない。** 本体の一覧の条件はコンテンツ自身の `status: normal` と `visibility: opened` だけで、削除されたアカウントのコンテンツは物理削除 (purge) のときに片付けている。そのため「D1 から取ったあとで作者の状態で除くと 1 ページの件数がずれる」という問題は起きず、写しは要らない。
 
-| カラム | 用途 |
-|---|---|
-| `id`, `aid`, `name`, `name_id`, `icon_url` | 作者の表示 |
-| `status`, `visibility` | 削除・凍結されたアカウントのコンテンツを一覧から除く |
-| `adult` (`birthdate` から計算) | 見せてよいレーティングの判定 (今の `Rateable.max_rating_for`) |
-| `synced_at` | 写しがどれだけ古いか |
-
-写しは次の 2 通りで更新する。
-
-1. **本体からのイベント:** アカウントの状態やプロフィールが変わったら、本体が Amis の Queue に送る
-2. **リクエストのたびに上書き:** 認証のたびに Hyperdrive で読んだ値で写しを書き換える
-
-### アカウント単位の Amis の設定 (`amis_account_settings`)
-
-今 `accounts.meta` に入っている次のキーは Amis の値なので、Amis 側に移す。
-
-- `amis_bonus_remaining`, `amis_bonus_granted_at` (登録直後に 1 回だけ渡す 300 回分の別枠)
-- `amis_weekly_cost_limit_micro` (アカウントごとの週の原価上限。0 以下は無制限)
+D1 の `account_id` / `author_id` は本体の `accounts.id` をそのまま入れ、外部キーは張らない。
 
 ### 物理削除 (purge)
 
@@ -57,7 +40,7 @@
 1. **トークンを取り出す:** Cookie `amiverse` が新形式ならそれを `.` で分ける。旧形式 (Rails の暗号化 Cookie) は読まず、未サインインとして扱う (サイトを開いた時点で本体が新形式に書き換えるため)。Cookie から取れなければ `Authorization: Bearer`
 2. **Hyperdrive で引く:** 各トークンの `sha256_hex(token)[0, 36]` で、sessions・accounts・アイコンの images を JOIN した SQL を **毎回 1 本** 投げる。先頭のトークンから見て、最初に有効なものが今のセッション
 3. **キャッシュはしない。** bcrypt がなくなったので、SQL 1 本で十分軽い。Hyperdrive のクエリキャッシュも無効にする (ログアウトをすぐ反映させるため)
-4. 結果は `c.var.currentAccount` (`id`, `aid`, `name`, `nameId`, `iconUrl`, `status`, `visibility`, `adult`, `admin`) と `c.var.currentSession`。D1 の `accounts` (写し) はこれで書き換える
+4. 結果は `c.var.currentAccount` (`id`, `aid`, `name`, `nameId`, `iconUrl`, `status`, `visibility`, `adult`, `admin`) と `c.var.currentSession`
 
 本体の DATETIME は `TZ=Asia/Tokyo` + `default_timezone :local` なので、タイムゾーンなしの JST で入っている。期限の比較に使う「今」は SQL の `NOW()` ではなく Worker から渡し、mysql2 の `timezone` を `MAIN_DB_TIMEZONE` (`+09:00`) にそろえる。
 
@@ -93,41 +76,19 @@ R2 (本体と同じバケット):
 - 画像を参照するのは `amis_plot_images`, `amis_character_images`, そして Plot / Character / Persona の `icon_id`。この参照先をすべて `amis_images` に向ける
 - 画像の自動判定 (今の `ModerationJob`) と、画像のレーティングをキャラクターに反映する処理 (今の `RatingPropagation` / `RatesLinkedMedia`) も Amis に移す。判定 API (`MODERATION_ENDPOINT`) は Queue のコンシューマーから呼ぶ
 
-## 4. コイン
+## 4. 利用の制限
 
-本体の台帳なので、Amis からは internal API を通して使う。Hyperdrive で直接書き込まない理由は [decisions.md](decisions.md) を参照。
-
-### Amis 側に移すもの
-
-今の `AiQuotaService` のうち、コイン以外はすべて Amis の持ち物になる。
+**Amis ではコインを使わない。** 本体の `AiQuotaService` のうち、1 日の無料枠・初回ボーナス・コインの消費はなくし、次の 2 つだけを残す。
 
 | 今 | Amis での置き場所 |
 |---|---|
-| 1 日の無料枠 `FREE_PER_DAY = 100` (`ai_daily_quotas`) | D1 `amis_daily_quotas` |
-| 初回ボーナス `INITIAL_BONUS = 300` (`accounts.meta`) | D1 `amis_account_settings` |
-| 週の原価上限 (`ai_usages` の SUM と Redis のキャッシュ) | D1 `amis_ai_usages` と集計値のキャッシュ |
+| 週の原価上限 (`ai_usages` の SUM と Redis のキャッシュ) | D1 `ai_usages` と集計値のキャッシュ。上限は全アカウント共通の設定値にする (アカウントごとの上書きは、必要になったら足す) |
 | 1 分あたりのレート制限 `RATE_LIMIT_PER_MINUTE = 10` (Redis の INCR) | Rate Limiting バインディング |
-| AI モデルの定義 (`ai_models`) | D1 `amis_ai_models` |
+| AI モデルの定義 (`ai_models`) | D1 `ai_models` |
 
-### 消費の順番
+確かめる順番は、レート制限 → 週の原価上限。どちらも Amis の中で完結するので、本体の API は呼ばない。生成に失敗したときやキャンセルされたときも、返すものはない (原価は実際に使った分だけを `ai_usages` に記録する)。
 
-順番は今と同じ。
-
-1. レート制限
-2. 週の原価上限
-3. 無料枠 (無料モデルのとき)
-4. ボーナス (無料モデルのとき)
-5. ここまでで払えなければ、コイン API で消費する
-
-3 と 4 は D1、5 は本体なので、同じトランザクションにはできない。**先に D1 の枠を確保し、コイン API が失敗したら確保した分を戻す** 順にする。何で払ったかは今と同じくメッセージの `meta.charge` に記録する。
-
-### 返金
-
-生成に失敗したときやキャンセルされたときに返す。今の設計 (「二重に返すより、返し損ねるほうが害が小さい」) をそのまま守り、返すのは 1 回だけにする。
-
-- 無料枠とボーナスは D1 で戻す
-- コインは refund API で戻す。`idempotency_key` が同じなら何度呼んでも 1 回分しか返らない
-- メッセージに `meta.refunded_at` を付け、同じメッセージを二度と返金しない
+フロントはコインの残高やモデルごとの `coin_cost` を表示しているので、`/amis/status` などは今と同じ形で返し、`coin_cost` は 0 にする。
 
 ## 5. 通知
 
@@ -161,33 +122,17 @@ Amis 側で作る。
 署名には、既存の anyur_cf からの内部呼び出しと同じ方式を使う (`amiverse-backend` の `app/controllers/internal/base_controller.rb`)。本体も Workers に移ったら Service Binding に置き換える。
 
 ```
-POST /internal/coins/spend
-  { account_id, amount, idempotency_key, memo }
-  → 200 { ok: true, balance } | 402 { ok: false, balance }
-
-POST /internal/coins/refund
-  { idempotency_key }
-  → 200 { ok: true, balance }   (返金済みでも 200。2 回目からは何もしない)
-
-POST /internal/coins/balance
-  { account_id }
-  → 200 { balance }
-
 POST /internal/notifications
   { recipient_id, action, title, body, url, icon_url, source: "amis" }
   → 201
 ```
-
-- `idempotency_key` は `amis:msg:{message_aid}` のような値にする。本体の `coin_transactions` にユニーク制約付きのカラムとして追加する
-- spend の `kind` は `amis_spend`、refund は `amis_refund` (今の値をそのまま使う)
 
 ### 本体 → Amis (Queue のイベント)
 
 本体から Queues の HTTP API でメッセージを送る。
 
 ```
-{ type: "account.updated", account_id, aid, status, visibility, name, name_id, icon_url, adult, occurred_at }
-{ type: "account.purged",  account_id, occurred_at }
+{ type: "account.purged", account_id, occurred_at }
 ```
 
-Amis のコンシューマーは `occurred_at` が `amis_accounts.synced_at` より古いイベントを捨てる (届く順番が入れ替わっても大丈夫なように)。
+アカウントの情報は都度読むので、プロフィールや状態が変わったことを知らせるイベントは要らない。物理削除だけは Amis 側のデータを消す必要があるので、イベントを受け取る。

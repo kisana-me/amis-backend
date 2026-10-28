@@ -1,6 +1,5 @@
 import { sql } from "drizzle-orm";
 import { check, index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
-import { accounts } from "./accounts";
 import { aid, timestamps } from "./columns";
 import { CONTENT_STATUSES } from "./enums";
 import { images } from "./images";
@@ -10,7 +9,7 @@ import { plots } from "./plots";
 export const personas = sqliteTable("personas", {
   id: integer("id").primaryKey(),
   aid: aid(),
-  accountId: integer("account_id").references(() => accounts.id),
+  accountId: integer("account_id"),
   plotId: integer("plot_id").references(() => plots.id),
   iconId: integer("icon_id").references(() => images.id),
   name: text("name").notNull(),

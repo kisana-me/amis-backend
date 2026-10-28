@@ -1,22 +1,3 @@
-CREATE TABLE `accounts` (
-	`id` integer PRIMARY KEY NOT NULL,
-	`aid` text(14) NOT NULL,
-	`name` text NOT NULL,
-	`name_id` text NOT NULL,
-	`icon_url` text,
-	`status` integer DEFAULT 0 NOT NULL,
-	`visibility` integer DEFAULT 0 NOT NULL,
-	`adult` integer DEFAULT false NOT NULL,
-	`synced_at` integer NOT NULL,
-	`bonus_remaining` integer DEFAULT 0 NOT NULL,
-	`bonus_granted_at` integer,
-	`weekly_cost_limit_micro` integer DEFAULT 0 NOT NULL,
-	`created_at` integer NOT NULL,
-	`updated_at` integer NOT NULL
-);
---> statement-breakpoint
-CREATE UNIQUE INDEX `index_accounts_on_aid` ON `accounts` (`aid`);--> statement-breakpoint
-CREATE UNIQUE INDEX `index_accounts_on_name_id` ON `accounts` (`name_id`);--> statement-breakpoint
 CREATE TABLE `images` (
 	`id` integer PRIMARY KEY NOT NULL,
 	`aid` text(14) NOT NULL,
@@ -37,7 +18,6 @@ CREATE TABLE `images` (
 	`meta` text DEFAULT '{}' NOT NULL,
 	`created_at` integer NOT NULL,
 	`updated_at` integer NOT NULL,
-	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE no action,
 	CONSTRAINT "variants" CHECK(json_valid("variants")),
 	CONSTRAINT "meta" CHECK(json_valid("meta"))
 );
@@ -90,7 +70,6 @@ CREATE TABLE `ai_usages` (
 	`latency_ms` integer,
 	`gateway_log_id` text,
 	`created_at` integer NOT NULL,
-	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`ai_model_id`) REFERENCES `ai_models`(`id`) ON UPDATE no action ON DELETE set null,
 	FOREIGN KEY (`chat_id`) REFERENCES `chats`(`id`) ON UPDATE no action ON DELETE set null,
 	FOREIGN KEY (`chat_message_id`) REFERENCES `chat_messages`(`id`) ON UPDATE no action ON DELETE set null
@@ -101,15 +80,6 @@ CREATE INDEX `index_ai_usages_on_ai_model_id` ON `ai_usages` (`ai_model_id`);-->
 CREATE INDEX `index_ai_usages_on_chat_id` ON `ai_usages` (`chat_id`);--> statement-breakpoint
 CREATE INDEX `index_ai_usages_on_chat_message_id` ON `ai_usages` (`chat_message_id`);--> statement-breakpoint
 CREATE INDEX `index_ai_usages_on_created_at` ON `ai_usages` (`created_at`);--> statement-breakpoint
-CREATE TABLE `daily_quotas` (
-	`account_id` integer NOT NULL,
-	`used_on` text NOT NULL,
-	`used_count` integer DEFAULT 0 NOT NULL,
-	`created_at` integer NOT NULL,
-	PRIMARY KEY(`account_id`, `used_on`),
-	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE no action
-);
---> statement-breakpoint
 CREATE TABLE `characters` (
 	`id` integer PRIMARY KEY NOT NULL,
 	`aid` text(14) NOT NULL,
@@ -136,7 +106,6 @@ CREATE TABLE `characters` (
 	`meta` text DEFAULT '{}' NOT NULL,
 	`created_at` integer NOT NULL,
 	`updated_at` integer NOT NULL,
-	FOREIGN KEY (`author_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`icon_id`) REFERENCES `images`(`id`) ON UPDATE no action ON DELETE no action,
 	CONSTRAINT "meta" CHECK(json_valid("meta"))
 );
@@ -173,7 +142,6 @@ CREATE TABLE `plots` (
 	`meta` text DEFAULT '{}' NOT NULL,
 	`created_at` integer NOT NULL,
 	`updated_at` integer NOT NULL,
-	FOREIGN KEY (`author_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`icon_id`) REFERENCES `images`(`id`) ON UPDATE no action ON DELETE no action,
 	CONSTRAINT "chapters" CHECK(json_valid("chapters")),
 	CONSTRAINT "opening_scene" CHECK(json_valid("opening_scene")),
@@ -200,7 +168,6 @@ CREATE TABLE `lores` (
 	`meta` text DEFAULT '{}' NOT NULL,
 	`created_at` integer NOT NULL,
 	`updated_at` integer NOT NULL,
-	FOREIGN KEY (`author_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE no action,
 	CONSTRAINT "meta" CHECK(json_valid("meta"))
 );
 --> statement-breakpoint
@@ -232,7 +199,6 @@ CREATE TABLE `personas` (
 	`status` integer DEFAULT 0 NOT NULL,
 	`created_at` integer NOT NULL,
 	`updated_at` integer NOT NULL,
-	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`plot_id`) REFERENCES `plots`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`icon_id`) REFERENCES `images`(`id`) ON UPDATE no action ON DELETE no action,
 	CONSTRAINT "personas_owner_xor" CHECK((account_id IS NULL) <> (plot_id IS NULL))
@@ -263,7 +229,6 @@ CREATE TABLE `chats` (
 	`meta` text DEFAULT '{}' NOT NULL,
 	`created_at` integer NOT NULL,
 	`updated_at` integer NOT NULL,
-	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`plot_id`) REFERENCES `plots`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`persona_id`) REFERENCES `personas`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`ai_model_id`) REFERENCES `ai_models`(`id`) ON UPDATE no action ON DELETE set null,
@@ -326,7 +291,6 @@ CREATE TABLE `character_likes` (
 	`character_id` integer NOT NULL,
 	`created_at` integer NOT NULL,
 	PRIMARY KEY(`account_id`, `character_id`),
-	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`character_id`) REFERENCES `characters`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
@@ -369,7 +333,6 @@ CREATE TABLE `plot_likes` (
 	`plot_id` integer NOT NULL,
 	`created_at` integer NOT NULL,
 	PRIMARY KEY(`account_id`, `plot_id`),
-	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`plot_id`) REFERENCES `plots`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint

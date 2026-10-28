@@ -1,5 +1,4 @@
 import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
-import { accounts } from "./accounts";
 import { aiModels } from "./ai-models";
 import { chatMessages } from "./chat-messages";
 import { chats } from "./chats";
@@ -9,7 +8,7 @@ import { AI_USAGE_PURPOSES } from "./enums";
 // AI 呼び出し 1 回ごとの記録。週の原価上限の集計と、メッセージごとのトークン数・応答時間に使う
 export const aiUsages = sqliteTable("ai_usages", {
   id: integer("id").primaryKey(),
-  accountId: integer("account_id").references(() => accounts.id),
+  accountId: integer("account_id"),
   aiModelId: integer("ai_model_id").references(() => aiModels.id, { onDelete: "set null" }),
   chatId: integer("chat_id").references(() => chats.id, { onDelete: "set null" }),
   chatMessageId: integer("chat_message_id").references(() => chatMessages.id, { onDelete: "set null" }),

@@ -1,12 +1,11 @@
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
-import { accounts } from "./accounts";
 import { aid, jsonValid, meta, timestamps } from "./columns";
 import { CONTENT_STATUSES, VISIBILITIES } from "./enums";
 
 export const lores = sqliteTable("lores", {
   id: integer("id").primaryKey(),
   aid: aid(),
-  authorId: integer("author_id").references(() => accounts.id),
+  authorId: integer("author_id"),
   title: text("title").notNull(),
   description: text("description").notNull().default(""),
   allowAttach: integer("allow_attach", { mode: "boolean" }).notNull().default(true),
