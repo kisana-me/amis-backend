@@ -17,6 +17,7 @@ import { homeRoutes } from "./routes/home";
 import { likeRoutes } from "./routes/likes";
 import { loreRoutes } from "./routes/lores";
 import { personaRoutes } from "./routes/personas";
+import { reportRoutes } from "./routes/reports";
 import { statusRoutes } from "./routes/status";
 
 export type AppDeps = {
@@ -59,6 +60,7 @@ export function createApp(deps: AppDeps = {}) {
   app.route("/", likeRoutes);
   app.route("/", chatRoutes);
   app.route("/", messageRoutes);
+  app.route("/", reportRoutes);
 
   app.notFound((c) => c.json({ status: "error", message: "見つかりませんでした" }, 404));
 

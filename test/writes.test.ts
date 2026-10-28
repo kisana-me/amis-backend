@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app";
-import { characterImages, characters, images, loreEntries, lores, personas, plotLikes, plots } from "../src/db/schema";
+import { characterImages, characters, images, loreEntries, lores, personas, plotLikes, plots, reports } from "../src/db/schema";
 import type { ImageProcessor } from "../src/media/images";
 import { accountRow, ctx, db, fakeMainDb, insertCharacter, insertPlot } from "./helpers";
 
@@ -230,5 +230,26 @@ describe("プロットの作成・更新・削除", () => {
     expect((await send("PATCH", `/plots/${created.plot.aid}`, plotForm({ title: "乗っ取り" }), "other")).status).toBe(404);
     expect((await send("DELETE", `/plots/${created.plot.aid}`, undefined, "other")).status).toBe(404);
     expect((await send("DELETE", `/plots/${created.plot.aid}`)).status).toBe(200);
+  });
+});
+
+describe("通報", () => {
+  it("キャラとプロットを通報できる。未サインインでもよい。非公開や存在しないものは弾く", async () => {
+    const plot = await insertPlot({ visibility: 1 });
+    const res = await send("POST", "/reports", { report: { target_type: "amis_plot", target_aid: plot.aid, category: "spam", description: "宣伝" } });
+    expect(res.status).toBe(201);
+    expect(await res.json()).toEqual({ status: "success", message: "通報しました" });
+    const anonymous = await app().request("/v1/amis/reports", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ report: { target_type: "amis_character", target_aid: (await insertCharacter()).aid } }),
+    }, env, ctx);
+    expect(anonymous.status).toBe(201);
+
+    const closed = await insertPlot({ visibility: 2 });
+    const rejected = await json(send("POST", "/reports", { report: { target_type: "amis_plot", target_aid: closed.aid } }));
+    expect(rejected).toEqual({ status: "error", message: "通報できませんでした", errors: ["通報対象のプロットが見つかりませんでした"] });
+    expect((await send("POST", "/reports", { report: { target_type: "post", target_aid: plot.aid } })).status).toBe(422);
+    const rows = await db().select().from(reports);
+    expect(rows.map((r) => [r.targetType, r.category, r.accountId])).toEqual([["amis_plot", 1, 1], ["amis_character", 0, null]]);
   });
 });

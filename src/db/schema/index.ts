@@ -14,3 +14,4 @@ export * from "./personas";
 export * from "./chats";
 export * from "./chat-messages";
 export * from "./joins";
+export * from "./reports";
