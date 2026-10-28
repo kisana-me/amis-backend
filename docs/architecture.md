@@ -5,7 +5,7 @@
 ```
               ┌─ Gateway Worker ─┬─ /v1/amis/*  ──▶ Amis Worker (Service Binding)
 フロント ──▶   │                  └─ それ以外    ──▶ Rails (本体)
-(OpenNext)    └─ Auth Worker (セッション検証。Gateway と Amis の両方から呼ぶ)
+(OpenNext)
 
 Amis Worker ──▶ D1 (amis)        R2 (amis/ 配下)     Images      AI Gateway
             ──▶ Durable Objects (生成とストリーム配信)  Queues      Cron Triggers
@@ -15,7 +15,8 @@ Amis Worker ──▶ D1 (amis)        R2 (amis/ 配下)     Images      AI Gate
 ```
 
 - 本体のデータは「読むときは Hyperdrive、変えるときは本体の API」。Amis が本体の DB に書き込むことはしない
-- Gateway Worker と Auth Worker は本体側 (`amiverse-backend` の `edge/`) に置く。本体を Workers に移すときの土台にもなる
+- Gateway Worker は本体側 (`amiverse-backend` の `edge/`) に置く。本体を Workers に移すときの土台にもなる
+- セッションの検証は Auth Worker に分けず、Amis の中で Hyperdrive を引いて行う (boundary.md の「認証」)
 - フロントの API の向き先 (`NEXT_PUBLIC_BACK_URL`) は Gateway に向ける。`/v1/amis/*` のパスは今のまま変えない
 
 ## 技術スタック
@@ -35,7 +36,7 @@ Amis Worker ──▶ D1 (amis)        R2 (amis/ 配下)     Images      AI Gate
 | 画像 | Images バインディング + R2 | `amis/images/originals/`、`amis/images/variants/` |
 | OG 画像 | workers-og (satori + resvg-wasm) | 日本語フォントはサブセット化して R2 に置く |
 | レート制限 | Rate Limiting バインディング | 1 分あたり 10 通。Redis の INCR の置き換え |
-| キャッシュ | KV または Cache API | bcrypt の照合結果、週の原価の集計 |
+| キャッシュ | KV または Cache API | 週の原価の集計 |
 | 管理画面 | Hono JSX (SSR) + Cloudflare Access | 管理者のログインは Access に任せる |
 | テスト | Vitest + `@cloudflare/vitest-pool-workers` | D1・DO・Queues をローカルで動かして試す |
 | 監視 | Workers Logs / Traces | フロントの `wrangler.jsonc` と同じ設定にする |

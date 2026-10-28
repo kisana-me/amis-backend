@@ -14,10 +14,9 @@
 
 この時点ではテーブル (`ai_models` / `ai_usages` / `ai_daily_quotas`) はまだ消さない。Amis の Rails 側の実装がまだ使っているので、手順 5 で D1 に移してから消す。
 
-### 1. Gateway と Auth Worker を作る (`amiverse-backend/edge/`)
+### 1. Gateway を作る (`amiverse-backend/edge/`)
 
 - Gateway: 最初は全部 Rails に転送するだけ。`NEXT_PUBLIC_BACK_URL` を Gateway に向ける
-- Auth Worker: boundary.md の「認証」に書いた検証の処理。本物の cookie で復号できることを確かめる
 
 ### 2. Amis Worker を作る (このリポジトリ)
 

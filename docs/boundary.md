@@ -5,7 +5,7 @@
 | 対象 | 持ち主 | Amis からの扱い方 |
 |---|---|---|
 | アカウント (`accounts`) | 本体 | Hyperdrive で読む + D1 に写し (`amis_accounts`) を持つ |
-| セッション (`sessions`) | 本体 | Hyperdrive で読み、Auth Worker で検証する |
+| セッション (`sessions`) | 本体 | Hyperdrive で読み、Amis の中で検証する |
 | コイン (`accounts.coin_balance` / `coin_transactions`) | 本体 | internal API |
 | 通知 (`notifications` / Web Push) | 本体 | internal API |
 | 無料枠・ボーナス・週の原価上限・レート制限 | Amis | D1 / Rate Limiting |
@@ -48,22 +48,20 @@
 
 ## 2. 認証
 
-### 今の仕組み (本体)
+サインイン Cookie の仕様は `amiverse-docs` の `session-cookie.md` にある。本体は bcrypt をやめ、Cookie `amiverse` の中身をトークンを `.` でつないだだけの形式 (新形式) に移している。これで Rails の外でも、復号なし・bcrypt なしで検証できる。
 
-- 暗号化された cookie `amiverse` (`domain: :all`, `tld_length: 2` なので `.amiverse.net` 全体で有効) に、トークンの配列が入っている
-- 検証の手順 (`app/models/concerns/token_tools.rb`)
-  1. トークンの SHA256 の先頭 36 文字で `sessions.token_lookup` を引く
-  2. 取れた行の `token_digest` と bcrypt で照合する
-- ネイティブアプリは `Authorization: Bearer <token>` で送ってくる
+### Amis でやること (`src/auth/`, `src/middleware/auth.ts`)
 
-### Auth Worker でやること
+本体の `before_action :current_account` と同じく、すべてのリクエストで今のアカウントを決める。
 
-この処理は Auth Worker に切り出し、Amis からも Gateway からも Service Binding で呼ぶ。本体を Workers に移すときも同じものを使う。
+1. **トークンを取り出す:** Cookie `amiverse` が新形式ならそれを `.` で分ける。旧形式 (Rails の暗号化 Cookie) は読まず、未サインインとして扱う (サイトを開いた時点で本体が新形式に書き換えるため)。Cookie から取れなければ `Authorization: Bearer`
+2. **Hyperdrive で引く:** 各トークンの `sha256_hex(token)[0, 36]` で、sessions・accounts・アイコンの images を JOIN した SQL を **毎回 1 本** 投げる。先頭のトークンから見て、最初に有効なものが今のセッション
+3. **キャッシュはしない。** bcrypt がなくなったので、SQL 1 本で十分軽い。Hyperdrive のクエリキャッシュも無効にする (ログアウトをすぐ反映させるため)
+4. 結果は `c.var.currentAccount` (`id`, `aid`, `name`, `nameId`, `iconUrl`, `status`, `visibility`, `adult`, `admin`) と `c.var.currentSession`。D1 の `accounts` (写し) はこれで書き換える
 
-1. **cookie の復号:** Rails の `cookies.encrypted` は AES-256-GCM。鍵は `secret_key_base` から PBKDF2-SHA256 (salt は `"authenticated encrypted cookie"`) で作られている。WebCrypto で同じことができる。繰り返し回数などの細かい値は、実際の cookie を使って合っているか確かめる。Bearer のときは復号はいらない
-2. **Hyperdrive で引く:** sessions と accounts を JOIN し、セッションの状態・有効期限・アカウントの状態を 1 本のクエリで取る。これは **毎回** 行う
-3. **bcrypt の照合結果をキャッシュする:** 本番の bcrypt はコスト 12 で、Workers で照合すると 1 回あたり数百ミリ秒の CPU を使う。`sha256(token)` → `session_id` の対応を KV か Cache API に 5 分ほど置き、bcrypt はキャッシュがないときだけ行う。ログアウトや削除は 2 で毎回確かめるので、キャッシュがあってもすぐ反映される
-4. 戻り値は `{ account_id, session_id, account: { status, ... } }`。Amis はこれを使って `amis_accounts` を書き換える
+本体の DATETIME は `TZ=Asia/Tokyo` + `default_timezone :local` なので、タイムゾーンなしの JST で入っている。期限の比較に使う「今」は SQL の `NOW()` ではなく Worker から渡し、mysql2 の `timezone` を `MAIN_DB_TIMEZONE` (`+09:00`) にそろえる。
+
+この処理は、本体を Workers に移すときにも同じものを使う。
 
 ### CSRF
 

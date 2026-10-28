@@ -3,19 +3,33 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "vitest run",
+    "typecheck": "tsc",
+    "cf-typegen": "wrangler types",
     "db:generate": "drizzle-kit generate",
     "db:migrate:local": "wrangler d1 migrations apply amis --local"
   },
   "dependencies": {
-    "drizzle-orm": "^0.45.4"
+    "drizzle-orm": "^0.45.4",
+    "hono": "^4.13.14",
+    "mysql2": "^3.24.6"
   },
   "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.4.9",
     "@cloudflare/workers-types": "^5.20261026.1",
+    "@types/node": "^24.19.2",
     "drizzle-kit": "^0.31.11",
     "typescript": "^6.0.3",
+    "vitest": "^5.0.5",
     "wrangler": "^4.152.0"
   },
   "allowScripts": {
-    "workerd@1.20261019.1": true
+    "esbuild@0.28.1": true,
+    "esbuild@0.18.20": true,
+    "esbuild@0.25.12": true,
+    "esbuild@0.28.2": true,
+    "workerd@1.20261023.1": true
   }
 }

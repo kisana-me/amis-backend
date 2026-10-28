@@ -4,6 +4,7 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
   "d1_databases": [
     {
       "binding": "DB",
@@ -12,5 +13,33 @@
       "database_id": "00000000-0000-0000-0000-000000000000",
       "migrations_dir": "migrations"
     }
-  ]
+  ],
+  // 本体の MariaDB (sessions / accounts / images を読むだけ)。
+  // クエリキャッシュは無効にした設定を使う。キャッシュがあるとログアウトがすぐに反映されない
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      // `wrangler hyperdrive list` の id に置き換える
+      "id": "00000000000000000000000000000000",
+      // ローカルの wrangler dev とテストだけで使う接続先 (本体の compose の MariaDB)。デプロイ後は使われない。
+      // 環境変数 CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE があればそちらが優先される
+      "localConnectionString": "mysql://root:mdbroot@127.0.0.1:3306/amiverse_development"
+    }
+  ],
+  "vars": {
+    // 本体の S3_PUBLIC_ENDPOINT / BACK_URL と同じ値にする
+    "S3_PUBLIC_ENDPOINT": "",
+    "BACK_URL": "",
+    // 本体は TZ=Asia/Tokyo かつ default_timezone :local なので、datetime はタイムゾーンなしの JST で入っている
+    "MAIN_DB_TIMEZONE": "+09:00"
+  },
+  "observability": {
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true
+    },
+    "traces": {
+      "enabled": true
+    }
+  }
 }
