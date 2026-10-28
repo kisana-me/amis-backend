@@ -3,20 +3,22 @@ import { Hono } from "hono";
 import {
   CHAT_STATUSES, CONTENT_STATUSES, characterImages, chats, lores, personas, plotImages, plotLikes, plotLores, plots, VISIBILITIES,
 } from "../db/schema";
+import { ratingLabel } from "../lib/ratings";
+import { requireSignin } from "../middleware/auth";
+import { characterImagesOf, entriesOf, imageIdsOf, plotImagesOf } from "../queries/related";
 import type { AppEnv } from "../env";
 import { notFound } from "../lib/http";
 import { maxRatingFor } from "../lib/ratings";
 import { findVisiblePlot, visiblePlots } from "../queries/visibility";
-import { type Loaders, loadCasts, loadContext } from "../views/context";
-import { chapterDefinitions, imageDisplayUrl, imageJson, imageUrl, openingImageAids, openingLines, plotJson } from "../views/json";
+import { loadCasts, loadContext, loadersOf } from "../views/context";
+import {
+  chapterDefinitions, chapterEditDefinitions, editableCharacterJson, editableLoreJson, imageDisplayUrl, imageJson, imageUrl,
+  openingImageAids, openingLines, ownedImageJson, plotIconUrl, plotJson, visibilityLabel,
+} from "../views/json";
 
 const LIMIT = 50;
 
 export const plotRoutes = new Hono<AppEnv>();
-
-const loaders = (c: { var: AppEnv["Variables"]; env: AppEnv["Bindings"] }): Loaders => ({
-  db: c.var.db, mainDb: c.var.mainDb, env: c.env, viewer: c.var.currentAccount,
-});
 
 // クリア数の多い順 (本体の plots#index)
 plotRoutes.post("/plots", async (c) => {
@@ -24,8 +26,69 @@ plotRoutes.post("/plots", async (c) => {
     .where(visiblePlots(maxRatingFor(c.var.currentAccount)))
     .orderBy(desc(plots.clearsCount), desc(plots.id))
     .limit(LIMIT);
-  const ctx = await loadContext(loaders(c), { plots: rows });
+  const ctx = await loadContext(loadersOf(c), { plots: rows });
   return c.json({ status: "success", plots: rows.map((p) => plotJson(p, ctx)) });
+});
+
+// 編集用。公開向けの show と違い、章のねらいや非公開設定、付いている設定集の中身まで返す (本体の plots#edit)
+plotRoutes.post("/plots/:aid/edit", requireSignin, async (c) => {
+  const { db } = c.var;
+  const viewer = c.var.currentAccount!;
+  const [plot] = await db.select().from(plots)
+    .where(and(eq(plots.aid, c.req.param("aid")), ne(plots.status, CONTENT_STATUSES.deleted), eq(plots.authorId, viewer.id))).limit(1);
+  if (!plot) return notFound(c, "プロットが見つかりませんでした");
+
+  const [casts, images, attached, recommended] = await Promise.all([
+    loadCasts(db, [plot]),
+    plotImagesOf(db, plot.id),
+    // 他人のものでも中身まで返す。何が AI に渡るのか分からないまま公開させないため
+    db.select({ lore: lores }).from(plotLores).innerJoin(lores, eq(lores.id, plotLores.loreId))
+      .where(eq(plotLores.plotId, plot.id)).orderBy(sql`${plotLores}.rowid`),
+    db.select().from(personas).where(and(eq(personas.plotId, plot.id), ne(personas.status, CONTENT_STATUSES.deleted)))
+      .orderBy(asc(personas.position), asc(personas.id)),
+  ]);
+  const cast = casts.get(plot.id) ?? [];
+  const attachedLores = attached.map((row) => row.lore);
+  const [owned, entries] = await Promise.all([
+    characterImagesOf(db, cast.map((x) => x.character.id)),
+    entriesOf(db, attachedLores.map((l) => l.id)),
+  ]);
+  const ctx = await loadContext(loadersOf(c), {
+    plots: [plot], casts, lores: attachedLores,
+    imageIds: [...images.map((i) => i.imageId), ...imageIdsOf(owned.values())],
+  });
+
+  return c.json({
+    status: "success",
+    plot: {
+      aid: plot.aid, title: plot.title, tagline: plot.tagline, description: plot.description,
+      situation: plot.situation, situation_public: plot.situationPublic, allow_fork: plot.allowFork,
+      visibility: visibilityLabel(plot.visibility),
+      user_rating: ratingLabel(plot.userRating),
+      rating: ratingLabel(plot.rating),
+      icon_url: plotIconUrl(plot, ctx),
+      has_icon: plot.iconId !== null && ctx.images.has(plot.iconId),
+      images: images.flatMap((o) => ownedImageJson(o, ctx)),
+      opening: openingLines(plot).map((line) => ({
+        speaker: line.speaker,
+        character_aid: cast.find((x) => x.plotCharacter.speakerKey === line.speaker)?.character.aid ?? null,
+        text: line.text,
+        icon: line.icon ?? null,
+        image: line.image ?? null,
+      })),
+      cast: cast.map(({ plotCharacter, character }) => ({
+        speaker_key: plotCharacter.speakerKey,
+        role_name: plotCharacter.roleName,
+        role_description: plotCharacter.roleDescription,
+        is_lead: plotCharacter.isLead,
+        character: editableCharacterJson(character, ctx, viewer.id, owned.get(character.id) ?? []),
+      })),
+      // 結末 (endings) は廃止した
+      chapters: chapterEditDefinitions(plot),
+      lores: attachedLores.map((lore) => editableLoreJson(lore, entries.get(lore.id) ?? [], ctx, viewer.id)),
+      recommended_personas: recommended.map((p) => ({ aid: p.aid, name: p.name, description: p.description })),
+    },
+  });
 });
 
 // 本体の plots#show。一覧に出ないものでも作者本人には見せる。結末 (endings) は廃止した
@@ -72,7 +135,7 @@ plotRoutes.post("/plots/:aid", async (c) => {
   for (const row of castImages) byCharacter.set(row.characterId, [...(byCharacter.get(row.characterId) ?? []), row.imageId]);
   const candidateIds = [...images.map((i) => i.imageId), ...castCharacterIds.flatMap((id) => byCharacter.get(id) ?? [])];
 
-  const ctx = await loadContext(loaders(c), {
+  const ctx = await loadContext(loadersOf(c), {
     plots: [plot],
     casts,
     imageIds: [...carouselIds, ...candidateIds, ...recommended.map((p) => p.iconId).filter((id): id is number => id !== null)],

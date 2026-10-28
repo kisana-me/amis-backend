@@ -8,6 +8,12 @@ import type { MainDb } from "./lib/main-db";
 import type { Bindings } from "./env";
 import { characterRoutes } from "./routes/characters";
 import { plotRoutes } from "./routes/plots";
+import { accountRoutes } from "./routes/accounts";
+import { cardRoutes } from "./routes/cards";
+import { homeRoutes } from "./routes/home";
+import { likeRoutes } from "./routes/likes";
+import { loreRoutes } from "./routes/lores";
+import { personaRoutes } from "./routes/personas";
 import { statusRoutes } from "./routes/status";
 
 export type AppDeps = {
@@ -35,6 +41,12 @@ export function createApp(deps: AppDeps = {}) {
   app.route("/", statusRoutes);
   app.route("/", characterRoutes);
   app.route("/", plotRoutes);
+  app.route("/", homeRoutes);
+  app.route("/", accountRoutes);
+  app.route("/", cardRoutes);
+  app.route("/", loreRoutes);
+  app.route("/", personaRoutes);
+  app.route("/", likeRoutes);
 
   app.notFound((c) => c.json({ status: "error", message: "見つかりませんでした" }, 404));
 

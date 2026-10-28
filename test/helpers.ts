@@ -46,16 +46,21 @@ export function fakeMainDb(accounts: AccountRow[], sessions: { token: string; ac
 export function appWith(accounts: AccountRow[], sessions: { token: string; accountId: number }[] = []) {
   const app = createApp({ mainDb: () => fakeMainDb(accounts, sessions) });
   return {
-    post: (path: string, opts: { token?: string; body?: unknown } = {}) =>
-      app.request(`/v1/amis${path}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(opts.token ? { Authorization: `Bearer ${opts.token}` } : {}),
-        },
-        body: JSON.stringify(opts.body ?? {}),
-      }, env, ctx),
+    json: async (path: string, opts: { token?: string; body?: unknown } = {}) =>
+      (await (await post(path, opts)).json()) as Record<string, any>,
+    post: (path: string, opts: { token?: string; body?: unknown } = {}) => post(path, opts),
   };
+
+  function post(path: string, opts: { token?: string; body?: unknown } = {}) {
+    return app.request(`/v1/amis${path}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(opts.token ? { Authorization: `Bearer ${opts.token}` } : {}),
+      },
+      body: JSON.stringify(opts.body ?? {}),
+    }, env, ctx);
+  }
 }
 
 export async function insertCharacter(values: Partial<typeof schema.characters.$inferInsert> = {}) {

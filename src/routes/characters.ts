@@ -1,20 +1,22 @@
-import { and, asc, count, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, ne } from "drizzle-orm";
 import { Hono } from "hono";
-import { characterImages, characterLikes, characters, plotCharacters, plots } from "../db/schema";
+import { CONTENT_STATUSES, characterImages, characterLikes, characters, plotCharacters, plots } from "../db/schema";
 import type { AppEnv } from "../env";
-import { notFound } from "../lib/http";
+import { jsonBody, notFound } from "../lib/http";
 import { maxRatingFor } from "../lib/ratings";
+import { requireSignin } from "../middleware/auth";
+import { characterImagesOf, containing, imageIdsOf } from "../queries/related";
 import { findVisibleCharacter, visibleCharacters, visiblePlots } from "../queries/visibility";
-import { type Loaders, loadContext } from "../views/context";
-import { characterJson, imageJson, plotJson } from "../views/json";
+import { type Character, loadContext, loadersOf } from "../views/context";
+import { characterJson, editableCharacterJson, imageJson, plotJson } from "../views/json";
 
 const LIMIT = 50;
+const SELECTABLE_LIMIT = 100;
+
+// 削除していない自分のキャラ (本体の own_characters)
+const ownCharacters = (accountId: number) => and(ne(characters.status, CONTENT_STATUSES.deleted), eq(characters.authorId, accountId));
 
 export const characterRoutes = new Hono<AppEnv>();
-
-const loaders = (c: { var: AppEnv["Variables"]; env: AppEnv["Bindings"] }): Loaders => ({
-  db: c.var.db, mainDb: c.var.mainDb, env: c.env, viewer: c.var.currentAccount,
-});
 
 // 人気順 (本体の characters#index)
 characterRoutes.post("/characters", async (c) => {
@@ -22,8 +24,40 @@ characterRoutes.post("/characters", async (c) => {
     .where(visibleCharacters(maxRatingFor(c.var.currentAccount)))
     .orderBy(desc(characters.chatsCount), desc(characters.id))
     .limit(LIMIT);
-  const ctx = await loadContext(loaders(c), { characters: rows });
+  const ctx = await loadContext(loadersOf(c), { characters: rows });
   return c.json({ status: "success", characters: rows.map((ch) => characterJson(ch, ctx)) });
+});
+
+// プロットに出演させられるキャラ。自分のキャラ (非公開も) を先頭に、
+// その後ろへ他人の allow_casting なキャラを並べる (本体の characters#selectable)
+characterRoutes.post("/characters/selectable", requireSignin, async (c) => {
+  const { db } = c.var;
+  const viewer = c.var.currentAccount!;
+  const query = String((await jsonBody(c)).q ?? "").trim();
+  const search = query ? containing(characters.name, query) : undefined;
+
+  const [mine, others] = await Promise.all([
+    db.select().from(characters).where(and(ownCharacters(viewer.id), search)).orderBy(desc(characters.id)).limit(SELECTABLE_LIMIT),
+    db.select().from(characters)
+      .where(and(visibleCharacters(maxRatingFor(viewer)), eq(characters.allowCasting, true), ne(characters.authorId, viewer.id), search))
+      .orderBy(desc(characters.chatsCount), desc(characters.id)).limit(SELECTABLE_LIMIT),
+  ]);
+  const owned = await characterImagesOf(db, [...mine, ...others].map((ch) => ch.id));
+  const ctx = await loadContext(loadersOf(c), { characters: [...mine, ...others], imageIds: imageIdsOf(owned.values()) });
+  const json = (ch: Character) => editableCharacterJson(ch, ctx, viewer.id, owned.get(ch.id) ?? []);
+  return c.json({ status: "success", mine: mine.map(json), others: others.map(json) });
+});
+
+// 編集用。persona_public に関わらず定義まで返す (本体の characters#edit)
+characterRoutes.post("/characters/:aid/edit", requireSignin, async (c) => {
+  const viewer = c.var.currentAccount!;
+  const [character] = await c.var.db.select().from(characters)
+    .where(and(eq(characters.aid, c.req.param("aid")), ownCharacters(viewer.id))).limit(1);
+  if (!character) return notFound(c, "キャラが見つかりませんでした");
+
+  const owned = await characterImagesOf(c.var.db, [character.id]);
+  const ctx = await loadContext(loadersOf(c), { characters: [character], imageIds: imageIdsOf(owned.values()) });
+  return c.json({ status: "success", character: editableCharacterJson(character, ctx, viewer.id, owned.get(character.id) ?? []) });
 });
 
 // 本体の characters#show。一覧に出ないものでも作者本人には見せる
@@ -59,7 +93,7 @@ characterRoutes.post("/characters/:aid", async (c) => {
 
   // カルーセルはアイコンを先頭に、その後ろへ追加ぶんを並べる
   const imageIds = [character.iconId, ...publicImages.map((r) => r.imageId)].filter((id): id is number => id !== null);
-  const ctx = await loadContext(loaders(c), { characters: [character], plots: [...leadPlots, ...castPlots], imageIds });
+  const ctx = await loadContext(loadersOf(c), { characters: [character], plots: [...leadPlots, ...castPlots], imageIds });
 
   return c.json({
     status: "success",

@@ -15,12 +15,15 @@ type Json = unknown;
 
 // Rails は Bearer でも CSRF トークンを求めるので、/start でトークンとセッション cookie をもらう。
 // /start は呼ぶたびにその日の訪問を記録する (ログインボーナスが付く) ので、1 回だけ呼ぶ
-async function railsSession(): Promise<Record<string, string>> {
+async function railsSession(): Promise<{ headers: Record<string, string>; nameId: string | null }> {
   const cookie = TOKEN ? `amiverse=${TOKEN}` : "";
   const res = await fetch(`${RAILS}/v1/start`, { headers: cookie ? { Cookie: cookie } : {} });
-  const { csrf_token } = (await res.json()) as { csrf_token: string };
+  const { csrf_token, account } = (await res.json()) as { csrf_token: string; account?: { name_id?: string } };
   const session = res.headers.getSetCookie().map((c) => c.split(";")[0]).filter((c) => c.startsWith("_amiverse="));
-  return { Cookie: [cookie, ...session].filter(Boolean).join("; "), "X-CSRF-Token": csrf_token };
+  return {
+    headers: { Cookie: [cookie, ...session].filter(Boolean).join("; "), "X-CSRF-Token": csrf_token },
+    nameId: account?.name_id ?? null,
+  };
 }
 
 async function post(base: string, path: string, body: Json, headers: Record<string, string>) {
@@ -40,7 +43,7 @@ async function post(base: string, path: string, body: Json, headers: Record<stri
 // --- 意図した違いをそろえる ---------------------------------------------------
 
 function normalizeRails(path: string, json: Json): Json {
-  if (path === "/status" && isObject(json)) {
+  if (path === "/status" && isObject(json) && "quota" in json) {
     const quota = json.quota as Record<string, unknown> | undefined;
     return {
       ...json,
@@ -53,6 +56,13 @@ function normalizeRails(path: string, json: Json): Json {
   if (/^\/plots\/[^/]+$/.test(path) && isObject(json) && isObject(json.plot)) {
     const { endings: _e, collected_count: _c, ...plot } = json.plot;
     return { ...json, plot };
+  }
+  if (/^\/plots\/[^/]+\/edit$/.test(path) && isObject(json) && isObject(json.plot)) {
+    const chapters = (json.plot.chapters as Record<string, unknown>[]).map(({ endings: _e, ...chapter }) => chapter);
+    return { ...json, plot: { ...json.plot, chapters } };
+  }
+  if (path.startsWith("/accounts/") && isObject(json) && "achievements" in json) {
+    return { ...json, achievements: [] };
   }
   return json;
 }
@@ -92,27 +102,59 @@ function diff(a: Json, b: Json, path = "", out: string[] = []): string[] {
 
 // --- 比べるリクエスト ---------------------------------------------------------
 
-const railsHeaders = await railsSession();
+const { headers: railsHeaders, nameId: myNameId } = await railsSession();
 const workerHeaders: Record<string, string> = TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {};
 
+const aidsOf = (json: Json, key: string) =>
+  isObject(json) && Array.isArray(json[key]) ? (json[key] as { aid: string }[]).map((x) => x.aid) : [];
+
 async function defaultTargets(): Promise<[string, Json][]> {
-  const characters = await post(RAILS, "/characters", {}, railsHeaders);
-  const aids = isObject(characters.json) ? (characters.json.characters as { aid: string }[]).map((c) => c.aid) : [];
-  const plotList = await post(RAILS, "/plots", {}, railsHeaders);
-  const plotAids2 = isObject(plotList.json) ? (plotList.json.plots as { aid: string }[]).map((p) => p.aid) : [];
+  const get = async (path: string, body: Json = {}) => (await post(RAILS, path, body, railsHeaders)).json;
+  const characterAids = aidsOf(await get("/characters"), "characters");
+  const plotAids = aidsOf(await get("/plots"), "plots");
+
   // キャラの詳細に出てくるプロットで、/status のモデルの選び方も比べる
-  const plotAids = new Set<string>();
-  for (const aid of aids) {
-    const detail = (await post(RAILS, `/characters/${aid}`, {}, railsHeaders)).json as Record<string, { aid: string }[]>;
-    for (const plot of [...(detail.lead_plots ?? []), ...(detail.cast_plots ?? [])]) plotAids.add(plot.aid);
+  const castPlotAids = new Set<string>();
+  const authorNameIds = new Set<string>();
+  for (const aid of characterAids) {
+    const detail = (await get(`/characters/${aid}`)) as Record<string, any>;
+    for (const plot of [...(detail.lead_plots ?? []), ...(detail.cast_plots ?? [])]) castPlotAids.add(plot.aid);
+    if (detail.character?.author?.name_id) authorNameIds.add(detail.character.author.name_id);
   }
+
+  // 自分のアカウントのページには非公開のものも出るので、編集画面の対象をここから集める
+  const mine = myNameId ? await get(`/accounts/@${myNameId}`) : null;
+  const myLores = TOKEN ? aidsOf(await get("/lores"), "lores") : [];
+  const selectableLores = TOKEN ? (await get("/lores/selectable")) as Record<string, { aid: string }[]> : {};
+
+  const signedIn: [string, Json][] = TOKEN
+    ? [
+      ["/personas", {}],
+      ["/my/likes/plots", {}],
+      ["/my/likes/characters", {}],
+      ["/characters/selectable", {}],
+      ["/lores", {}],
+      ["/lores/selectable", {}],
+      ...aidsOf(mine, "plots").map((aid): [string, Json] => [`/plots/${aid}/edit`, {}]),
+      ...aidsOf(mine, "characters").map((aid): [string, Json] => [`/characters/${aid}/edit`, {}]),
+    ]
+    : [];
+
   return [
     ["/status", {}],
-    ...[...plotAids].map((aid): [string, Json] => ["/status", { plot_aid: aid }]),
+    ...[...castPlotAids].map((aid): [string, Json] => ["/status", { plot_aid: aid }]),
+    ["/home", {}],
+    ["/home", { tab: "new" }],
+    ["/home", { tab: "trending" }],
     ["/characters", {}],
-    ...aids.map((aid): [string, Json] => [`/characters/${aid}`, {}]),
+    ...characterAids.map((aid): [string, Json] => [`/characters/${aid}`, {}]),
+    ...characterAids.map((aid): [string, Json] => ["/cards", { type: "character", aid }]),
     ["/plots", {}],
-    ...plotAids2.map((aid): [string, Json] => [`/plots/${aid}`, {}]),
+    ...plotAids.map((aid): [string, Json] => [`/plots/${aid}`, {}]),
+    ...plotAids.map((aid): [string, Json] => ["/cards", { type: "plot", aid }]),
+    ...[myNameId, ...authorNameIds].filter(Boolean).map((nameId): [string, Json] => [`/accounts/@${nameId}`, {}]),
+    ...[...new Set([...myLores, ...(selectableLores.others ?? []).map((l) => l.aid)])].map((aid): [string, Json] => [`/lores/${aid}`, {}]),
+    ...signedIn,
   ];
 }
 
