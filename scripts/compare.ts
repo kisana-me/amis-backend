@@ -61,6 +61,17 @@ function normalizeRails(path: string, json: Json): Json {
     const chapters = (json.plot.chapters as Record<string, unknown>[]).map(({ endings: _e, ...chapter }) => chapter);
     return { ...json, plot: { ...json.plot, chapters } };
   }
+  // チャットの結末とコイン・無料枠も廃止
+  if (path.startsWith("/chats") && isObject(json)) {
+    const chat = ({ ending_key: _k, ending_title: _t, ...rest }: Record<string, unknown>) => rest;
+    const quota = json.quota as Record<string, unknown> | undefined;
+    return {
+      ...json,
+      ...(isObject(json.chat) ? { chat: chat(json.chat) } : {}),
+      ...(Array.isArray(json.chats) ? { chats: json.chats.map((x) => chat(x as Record<string, unknown>)) } : {}),
+      ...(quota ? { quota: { weekly_usage_percent: quota.weekly_usage_percent } } : {}),
+    };
+  }
   if (path.startsWith("/accounts/") && isObject(json) && "achievements" in json) {
     return { ...json, achievements: [] };
   }
@@ -127,8 +138,16 @@ async function defaultTargets(): Promise<[string, Json][]> {
   const myLores = TOKEN ? aidsOf(await get("/lores"), "lores") : [];
   const selectableLores = TOKEN ? (await get("/lores/selectable")) as Record<string, { aid: string }[]> : {};
 
+  const chatAids = TOKEN
+    ? [...aidsOf(await get("/chats"), "chats"), ...aidsOf(await get("/chats", { tab: "archived" }), "chats")]
+    : [];
+
   const signedIn: [string, Json][] = TOKEN
     ? [
+      ["/chats", {}],
+      ["/chats", { tab: "archived" }],
+      ...chatAids.map((aid): [string, Json] => [`/chats/${aid}`, {}]),
+      ...chatAids.map((aid): [string, Json] => [`/chats/${aid}/palette`, {}]),
       ["/personas", {}],
       ["/my/likes/plots", {}],
       ["/my/likes/characters", {}],

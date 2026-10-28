@@ -3,7 +3,9 @@
 import { inArray } from "drizzle-orm";
 import { type Account, findAccountsByIds } from "../accounts/accounts";
 import { type Db, inChunks } from "../db/client";
-import { characters, images, type loreEntries, type lores, type personas, plotCharacters, type plots } from "../db/schema";
+import {
+  type aiModels, type chatMessages, type chats, characters, images, type loreEntries, type lores, type personas, plotCharacters, type plots,
+} from "../db/schema";
 import type { AppEnv } from "../env";
 import type { MainDb } from "../lib/main-db";
 import { maxRatingFor, type Viewer } from "../lib/ratings";
@@ -16,6 +18,9 @@ export type PlotCharacter = typeof plotCharacters.$inferSelect;
 export type Lore = typeof lores.$inferSelect;
 export type LoreEntry = typeof loreEntries.$inferSelect;
 export type Persona = typeof personas.$inferSelect;
+export type Chat = typeof chats.$inferSelect;
+export type ChatMessage = typeof chatMessages.$inferSelect;
+export type AiModel = typeof aiModels.$inferSelect;
 export type Cast = { plotCharacter: PlotCharacter; character: Character };
 
 export type ViewContext = {
