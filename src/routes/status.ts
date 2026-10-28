@@ -1,14 +1,13 @@
-import { asc, eq, inArray } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { Hono } from "hono";
-import type { Db } from "../db/client";
-import { aiModels, AI_MODEL_TIERS, CONTENT_STATUSES, characters, plotCharacters } from "../db/schema";
+import { aiModels, AI_MODEL_TIERS, CONTENT_STATUSES } from "../db/schema";
 import type { AppEnv } from "../env";
 import { jsonBody } from "../lib/http";
-import { maxRatingFor, ratingLabel, selfRating } from "../lib/ratings";
+import { maxRatingFor, ratingLabel } from "../lib/ratings";
+import { contentRating } from "../generation/models";
 import { requireSignin } from "../middleware/auth";
 import { findVisiblePlot } from "../queries/visibility";
 import { usagePercent, weeklyCostMicro } from "../usage/weekly";
-import type { Plot } from "../views/context";
 
 const TIER_LABELS = ["free", "premium"] as const;
 
@@ -48,12 +47,3 @@ statusRoutes.post("/status", requireSignin, async (c) => {
     })),
   });
 });
-
-// このプロットで生成される内容のレーティング。出演者込みで見る (本体の Plot#content_rating)。
-// 画像は上流に送らないので derived_rating は入れない
-export async function contentRating(db: Db, plot: Plot): Promise<number> {
-  const cast = await db.select().from(characters).where(
-    inArray(characters.id, db.select({ id: plotCharacters.characterId }).from(plotCharacters).where(eq(plotCharacters.plotId, plot.id))),
-  );
-  return Math.max(selfRating(plot), ...cast.map(selfRating));
-}

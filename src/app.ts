@@ -11,6 +11,7 @@ import { plotRoutes } from "./routes/plots";
 import { accountRoutes } from "./routes/accounts";
 import { cardRoutes } from "./routes/cards";
 import { chatRoutes } from "./routes/chats";
+import { messageRoutes } from "./routes/messages";
 import { homeRoutes } from "./routes/home";
 import { likeRoutes } from "./routes/likes";
 import { loreRoutes } from "./routes/lores";
@@ -49,6 +50,7 @@ export function createApp(deps: AppDeps = {}) {
   app.route("/", personaRoutes);
   app.route("/", likeRoutes);
   app.route("/", chatRoutes);
+  app.route("/", messageRoutes);
 
   app.notFound((c) => c.json({ status: "error", message: "見つかりませんでした" }, 404));
 
