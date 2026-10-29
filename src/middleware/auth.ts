@@ -21,9 +21,9 @@ export const currentAccount = (source: SessionSource = fromMainDb) =>
   });
 
 // 本体の V1::ApplicationController#require_signin と同じレスポンス
+export const signinRequired = (c: Context) => c.json({ status: "error", message: "サインインしてください" }, 401);
+
 export const requireSignin = createMiddleware<AppEnv>(async (c, next) => {
-  if (!c.var.currentAccount) {
-    return c.json({ status: "error", message: "サインインしてください" }, 401);
-  }
+  if (!c.var.currentAccount) return signinRequired(c);
   await next();
 });

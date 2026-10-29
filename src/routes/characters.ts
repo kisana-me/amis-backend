@@ -1,52 +1,60 @@
-import { and, asc, count, desc, eq, inArray, ne } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNotNull, ne, or } from "drizzle-orm";
 import { type Context, Hono } from "hono";
 import { saveCharacter } from "../writers/character";
 import { CONTENT_STATUSES, characterImages, characterLikes, characters, plotCharacters, plots } from "../db/schema";
 import type { AppEnv } from "../env";
-import { jsonBody, notFound } from "../lib/http";
+import { castBoolean, jsonBody, limitParam, notFound, queryParam, sortParam } from "../lib/http";
 import { maxRatingFor } from "../lib/ratings";
-import { requireSignin } from "../middleware/auth";
+import { requireSignin, signinRequired } from "../middleware/auth";
 import { characterImagesOf, containing, imageIdsOf } from "../queries/related";
 import { findVisibleCharacter, visibleCharacters, visiblePlots } from "../queries/visibility";
 import { type Character, loadContext, loadersOf } from "../views/context";
 import { characterJson, editableCharacterJson, imageJson, plotJson } from "../views/json";
 
 const LIMIT = 50;
-const SELECTABLE_LIMIT = 100;
+const SORTS = ["popular", "new"] as const;
 
 // 削除していない自分のキャラ (本体の own_characters)
 const ownCharacters = (accountId: number) => and(ne(characters.status, CONTENT_STATUSES.deleted), eq(characters.authorId, accountId));
 
 export const characterRoutes = new Hono<AppEnv>();
 
-// 人気順 (本体の characters#index)
+// キャラの一覧 (本体の characters#index と characters#selectable)。
+// author: "me" なら自分のもの (非公開も)、それ以外は一覧に出るもの。
+// castable なら見ている人がプロットに出演させられるものだけ (自分のものと、他人の allow_casting なもの。公式は出演させられない)。
+// include: ["images"] なら、ピッカー用に表情差分まで付けた編集向けの形で返す
 characterRoutes.post("/characters", async (c) => {
-  const rows = await c.var.db.select().from(characters)
-    .where(visibleCharacters(maxRatingFor(c.var.currentAccount)))
-    .orderBy(desc(characters.chatsCount), desc(characters.id))
-    .limit(LIMIT);
-  const ctx = await loadContext(loadersOf(c), { characters: rows });
-  return c.json({ status: "success", characters: rows.map((ch) => characterJson(ch, ctx)) });
-});
-
-// プロットに出演させられるキャラ。自分のキャラ (非公開も) を先頭に、
-// その後ろへ他人の allow_casting なキャラを並べる (本体の characters#selectable)
-characterRoutes.post("/characters/selectable", requireSignin, async (c) => {
   const { db } = c.var;
-  const viewer = c.var.currentAccount!;
-  const query = String((await jsonBody(c)).q ?? "").trim();
-  const search = query ? containing(characters.name, query) : undefined;
+  const viewer = c.var.currentAccount;
+  const body = await jsonBody(c);
+  const mineOnly = body.author === "me";
+  if (mineOnly && !viewer) return signinRequired(c);
 
-  const [mine, others] = await Promise.all([
-    db.select().from(characters).where(and(ownCharacters(viewer.id), search)).orderBy(desc(characters.id)).limit(SELECTABLE_LIMIT),
-    db.select().from(characters)
-      .where(and(visibleCharacters(maxRatingFor(viewer)), eq(characters.allowCasting, true), ne(characters.authorId, viewer.id), search))
-      .orderBy(desc(characters.chatsCount), desc(characters.id)).limit(SELECTABLE_LIMIT),
-  ]);
-  const owned = await characterImagesOf(db, [...mine, ...others].map((ch) => ch.id));
-  const ctx = await loadContext(loadersOf(c), { characters: [...mine, ...others], imageIds: imageIdsOf(owned.values()) });
-  const json = (ch: Character) => editableCharacterJson(ch, ctx, viewer.id, owned.get(ch.id) ?? []);
-  return c.json({ status: "success", mine: mine.map(json), others: others.map(json) });
+  const query = queryParam(body.q);
+  const castable = castBoolean(body.castable)
+    ? or(viewer ? eq(characters.authorId, viewer.id) : undefined, and(eq(characters.allowCasting, true), isNotNull(characters.authorId)))
+    : undefined;
+  const order = sortParam(body.sort, SORTS) === "new" ? [desc(characters.id)] : [desc(characters.chatsCount), desc(characters.id)];
+
+  const rows = await db.select().from(characters)
+    .where(and(
+      mineOnly ? ownCharacters(viewer!.id) : visibleCharacters(maxRatingFor(viewer)),
+      castable,
+      query ? containing(characters.name, query) : undefined,
+    ))
+    .orderBy(...order)
+    .limit(limitParam(body.limit, LIMIT));
+
+  if (!(Array.isArray(body.include) && body.include.includes("images"))) {
+    const ctx = await loadContext(loadersOf(c), { characters: rows });
+    return c.json({ status: "success", characters: rows.map((ch) => characterJson(ch, ctx)) });
+  }
+  const owned = await characterImagesOf(db, rows.map((ch) => ch.id));
+  const ctx = await loadContext(loadersOf(c), { characters: rows, imageIds: imageIdsOf(owned.values()) });
+  return c.json({
+    status: "success",
+    characters: rows.map((ch) => editableCharacterJson(ch, ctx, viewer?.id ?? null, owned.get(ch.id) ?? [])),
+  });
 });
 
 // 編集用。persona_public に関わらず定義まで返す (本体の characters#edit)

@@ -13,12 +13,12 @@ import { accountRoutes } from "./routes/accounts";
 import { cardRoutes } from "./routes/cards";
 import { chatRoutes } from "./routes/chats";
 import { messageRoutes } from "./routes/messages";
-import { homeRoutes } from "./routes/home";
 import { likeRoutes } from "./routes/likes";
 import { loreRoutes } from "./routes/lores";
 import { personaRoutes } from "./routes/personas";
 import { reportRoutes } from "./routes/reports";
-import { statusRoutes } from "./routes/status";
+import { modelRoutes } from "./routes/models";
+import { quotaRoutes } from "./routes/quota";
 
 export type AppDeps = {
   // テストで本体の DB を差し替える
@@ -49,10 +49,10 @@ export function createApp(deps: AppDeps = {}) {
     await next();
   });
 
-  app.route("/", statusRoutes);
+  app.route("/", quotaRoutes);
+  app.route("/", modelRoutes);
   app.route("/", characterRoutes);
   app.route("/", plotRoutes);
-  app.route("/", homeRoutes);
   app.route("/", accountRoutes);
   app.route("/", cardRoutes);
   app.route("/", loreRoutes);

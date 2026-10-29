@@ -6,15 +6,16 @@ const me = accountRow(1);
 const other = accountRow(2);
 const app = () => appWith([me, other], [{ token: "me", accountId: 1 }, { token: "other", accountId: 2 }]);
 
-describe("POST /home", () => {
-  it("タブで並び順が変わる", async () => {
+describe("POST /plots の並び順", () => {
+  it("sort で並び順が変わる", async () => {
     await insertPlot({ title: "古い人気", clearsCount: 9, chatsCount: 1 });
     await insertPlot({ title: "話題", clearsCount: 0, chatsCount: 50 });
     await insertPlot({ title: "新着", clearsCount: 1, chatsCount: 0 });
-    const titles = async (tab?: string) => (await app().json("/home", { body: tab ? { tab } : {} })).plots.map((p: any) => p.title);
+    const titles = async (sort?: string) => (await app().json("/plots", { body: sort ? { sort } : {} })).plots.map((p: any) => p.title);
     expect(await titles()).toEqual(["古い人気", "新着", "話題"]);
     expect(await titles("new")).toEqual(["新着", "話題", "古い人気"]);
     expect(await titles("trending")).toEqual(["話題", "古い人気", "新着"]);
+    expect((await app().json("/plots", { body: { sort: "new", limit: 1 } })).plots.map((p: any) => p.title)).toEqual(["新着"]);
   });
 });
 
@@ -61,12 +62,28 @@ describe("POST /cards", () => {
 });
 
 describe("ロア", () => {
-  it("一覧は自分のものだけで、本文の文字数の合計を付ける", async () => {
+  it("一覧は公開されているものを、付いているプロットの多い順に誰でも見られる。本文の文字数の合計を付ける", async () => {
     const [mine] = await db().insert(lores).values({ aid: uid("lo"), title: "自分", authorId: 1 }).returning();
-    await db().insert(lores).values({ aid: uid("lo"), title: "他人", authorId: 2 });
+    await db().insert(lores).values([
+      { aid: uid("lo"), title: "他人", authorId: 2, plotsCount: 3 },
+      { aid: uid("lo"), title: "非公開", authorId: 2, visibility: 2 },
+      { aid: uid("lo"), title: "削除済み", authorId: 2, status: 2 },
+    ]);
     await db().insert(loreEntries).values([{ loreId: mine.id, keywords: "a", body: "あいう" }, { loreId: mine.id, keywords: "b", body: "えお" }]);
-    const body = await app().json("/lores", { token: "me" });
-    expect(body.lores.map((l: any) => [l.title, l.body_length, l.mine])).toEqual([["自分", 5, true]]);
+    const body = await app().json("/lores");
+    expect(body.lores.map((l: any) => [l.title, l.body_length, l.mine])).toEqual([["他人", 0, false], ["自分", 5, false]]);
+    expect((await app().json("/lores", { body: { sort: "new" } })).lores.map((l: any) => l.title)).toEqual(["他人", "自分"]);
+  });
+
+  it("author: me は自分のもの (非公開も) を返し、サインインしていなければ 401", async () => {
+    await db().insert(lores).values([
+      { aid: uid("lo"), title: "自分の非公開", authorId: 1, visibility: 2 },
+      { aid: uid("lo"), title: "自分の削除済み", authorId: 1, status: 2 },
+      { aid: uid("lo"), title: "他人", authorId: 2 },
+    ]);
+    const body = await app().json("/lores", { token: "me", body: { author: "me" } });
+    expect(body.lores.map((l: any) => [l.title, l.mine])).toEqual([["自分の非公開", true]]);
+    expect((await app().post("/lores", { body: { author: "me" } })).status).toBe(401);
   });
 
   it("詳細は公開されているか自分のものなら読める", async () => {
@@ -78,16 +95,17 @@ describe("ロア", () => {
     expect(body.lore).not.toHaveProperty("body_length");
   });
 
-  it("ピッカーは自分のものと、他人の公開かつ付けてよいもの。% は文字として探す", async () => {
+  it("attachable は自分のものと、他人の付けてよいもの。% は文字として探す", async () => {
     await db().insert(lores).values([
       { aid: uid("lo"), title: "自分 100%", authorId: 1, visibility: 2 },
+      { aid: uid("lo"), title: "自分 100% 付けられない", authorId: 1, allowAttach: false },
       { aid: uid("lo"), title: "自分 100点", authorId: 1 },
       { aid: uid("lo"), title: "他人 100%", authorId: 2 },
       { aid: uid("lo"), title: "他人 100% 付けられない", authorId: 2, allowAttach: false },
     ]);
-    const body = await app().json("/lores/selectable", { token: "me", body: { q: "100%" } });
-    expect(body.mine.map((l: any) => l.title)).toEqual(["自分 100%"]);
-    expect(body.others.map((l: any) => l.title)).toEqual(["他人 100%"]);
+    const titles = async (body: object) => (await app().json("/lores", { token: "me", body: { q: "100%", attachable: true, sort: "new", ...body } })).lores.map((l: any) => l.title);
+    expect(await titles({ author: "me" })).toEqual(["自分 100% 付けられない", "自分 100%"]);
+    expect(await titles({})).toEqual(["他人 100%", "自分 100% 付けられない"]);
   });
 });
 
@@ -126,15 +144,26 @@ describe("POST /my/likes/plots", () => {
 });
 
 describe("キャラのピッカーと編集", () => {
-  it("ピッカーは自分のもの (非公開も) と、他人の出演させてよいもの。公式キャラは他人側に出ない", async () => {
+  it("ピッカーは author: me で自分のもの (非公開も)、castable で出演させてよいもの。公式キャラは出演させられない", async () => {
     await insertCharacter({ name: "自分の非公開", authorId: 1, visibility: 2 });
+    await insertCharacter({ name: "自分の出演不可", authorId: 1, allowCasting: false });
     await insertCharacter({ name: "他人", authorId: 2 });
     await insertCharacter({ name: "他人の出演不可", authorId: 2, allowCasting: false });
     await insertCharacter({ name: "公式", authorId: null });
-    const body = await app().json("/characters/selectable", { token: "me" });
-    expect(body.mine.map((c: any) => [c.name, c.mine, c.persona])).toEqual([["自分の非公開", true, "定義"]]);
-    expect(body.others.map((c: any) => [c.name, c.mine])).toEqual([["他人", false]]);
-    expect(body.others[0]).not.toHaveProperty("persona");
+    const picker = async (body: object) => (await app().json("/characters", { token: "me", body: { include: ["images"], sort: "new", ...body } })).characters;
+
+    const mine = await picker({ author: "me" });
+    expect(mine.map((c: any) => [c.name, c.mine, c.persona])).toEqual([["自分の出演不可", true, "定義"], ["自分の非公開", true, "定義"]]);
+    const castable = await picker({ castable: true });
+    expect(castable.map((c: any) => [c.name, c.mine])).toEqual([["他人", false], ["自分の出演不可", true]]);
+    expect(castable[0]).not.toHaveProperty("persona");
+    expect(castable[0]).toHaveProperty("images");
+  });
+
+  it("author: me はサインインしていなければ 401。castable はサインインしなくても引ける", async () => {
+    await insertCharacter({ name: "他人", authorId: 2 });
+    expect((await app().post("/characters", { body: { author: "me" } })).status).toBe(401);
+    expect((await app().json("/characters", { body: { castable: true, q: "他" } })).characters.map((c: any) => c.name)).toEqual(["他人"]);
   });
 
   it("編集は自分のものだけ。シークレットの絵も返す", async () => {

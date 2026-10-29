@@ -8,7 +8,7 @@ import { ratingLabel } from "../lib/ratings";
 import { requireSignin } from "../middleware/auth";
 import { characterImagesOf, entriesOf, imageIdsOf, plotImagesOf } from "../queries/related";
 import type { AppEnv } from "../env";
-import { notFound } from "../lib/http";
+import { jsonBody, limitParam, notFound, sortParam } from "../lib/http";
 import { maxRatingFor } from "../lib/ratings";
 import { findVisiblePlot, visiblePlots } from "../queries/visibility";
 import { loadCasts, loadContext, loadersOf, type Plot } from "../views/context";
@@ -18,15 +18,24 @@ import {
 } from "../views/json";
 
 const LIMIT = 50;
+const SORTS = ["popular", "new", "trending"] as const;
 
 export const plotRoutes = new Hono<AppEnv>();
 
-// クリア数の多い順 (本体の plots#index)
+// 公開されているプロットの一覧 (本体の plots#index と home#index)。sort で並び順を変える
 plotRoutes.post("/plots", async (c) => {
+  const body = await jsonBody(c);
+  const sort = sortParam(body.sort, SORTS);
+  const order =
+    sort === "new" ? [desc(plots.id)]
+    : sort === "trending" ? [desc(plots.chatsCount), desc(plots.id)]
+    // 完結数がランキングの主指標
+    : [desc(plots.clearsCount), desc(plots.chatsCount), desc(plots.id)];
+
   const rows = await c.var.db.select().from(plots)
     .where(visiblePlots(maxRatingFor(c.var.currentAccount)))
-    .orderBy(desc(plots.clearsCount), desc(plots.id))
-    .limit(LIMIT);
+    .orderBy(...order)
+    .limit(limitParam(body.limit, LIMIT));
   const ctx = await loadContext(loadersOf(c), { plots: rows });
   return c.json({ status: "success", plots: rows.map((p) => plotJson(p, ctx)) });
 });

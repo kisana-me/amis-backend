@@ -5,9 +5,9 @@ import { accountRow, appWith, cast, db, insertAiModel, insertCharacter, insertPl
 const me = accountRow(1);
 const app = () => appWith([me], [{ token: "tok", accountId: 1 }]);
 
-describe("POST /status", () => {
+describe("POST /quota", () => {
   it("サインインしていなければ 401", async () => {
-    expect((await app().post("/status")).status).toBe(401);
+    expect((await app().post("/quota")).status).toBe(401);
   });
 
   it("今週の原価だけを数えて、上限に対する割合を返す", async () => {
@@ -18,10 +18,12 @@ describe("POST /status", () => {
       { accountId: 1, costMicro: 9_000_000, createdAt: new Date(now - 8 * 24 * 3600_000) },
       { accountId: 2, costMicro: 9_000_000, createdAt: new Date(now) },
     ]);
-    const res = await app().post("/status", { token: "tok" });
-    expect(await res.json()).toMatchObject({ status: "success", quota: { weekly_usage_percent: 25 }, queue_position: 0 });
+    const res = await app().post("/quota", { token: "tok" });
+    expect(await res.json()).toEqual({ status: "success", quota: { weekly_usage_percent: 25 } });
   });
+});
 
+describe("POST /models", () => {
   it("モデルは並び順で返し、プロットのレーティングで使えるかどうかと既定を付ける", async () => {
     await insertAiModel({ name: "premium", tier: 1, position: 0 });
     await insertAiModel({ name: "nsfw まで", position: 1, maxRating: RATINGS.nsfw });
@@ -31,13 +33,13 @@ describe("POST /status", () => {
     const plot = await insertPlot({ userRating: RATINGS.general });
     await cast(plot.id, (await insertCharacter({ userRating: RATINGS.r18 })).id);
 
-    const plain = (await (await app().post("/status", { token: "tok" })).json()) as { models: { name: string; allowed: boolean; default: boolean }[] };
+    const plain = (await (await app().post("/models")).json()) as { models: { name: string; allowed: boolean; default: boolean }[] };
     expect(plain.models.map((m) => [m.name, m.allowed, m.default])).toEqual([
       ["premium", true, false], ["nsfw まで", true, true], ["r18 まで", true, false],
     ]);
 
     // 出演者が r18 なので、プロットの内容は r18 として見る
-    const withPlot = (await (await app().post("/status", { token: "tok", body: { plot_aid: plot.aid } })).json()) as typeof plain;
+    const withPlot = (await (await app().post("/models", { body: { plot_aid: plot.aid } })).json()) as typeof plain;
     expect(withPlot.models.map((m) => [m.name, m.allowed, m.default])).toEqual([
       ["premium", true, false], ["nsfw まで", false, false], ["r18 まで", true, true],
     ]);
