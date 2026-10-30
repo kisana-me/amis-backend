@@ -10,7 +10,8 @@
 // - id は本体と同じ値を使う。参照をそのまま保てて、突き合わせもしやすい
 // - 本体の DATETIME はタイムゾーンなしの JST なので、epoch ミリ秒に直す
 // - 廃止したもの (ゲストのチャット、結末、コイン) は持ってこない
-// - 画像は Amis から参照されているものだけを持ってくる
+// - 画像は Amis から参照されているものだけを持ってくる。R2 のファイルは別にコピーする。
+//   コピーするキーの一覧を <出力先>.images.txt に書くので、scripts/copy-images.ts に渡す
 import { writeFileSync } from "node:fs";
 import { createConnection } from "mysql2/promise";
 
@@ -104,8 +105,9 @@ const imageRef = (id: unknown) => (existingImages.has(id) ? (id as number) : nul
 insert("images", images.map((r) => ({
   id: r.id as number, aid: r.aid as string, account_id: r.account_id as number | null,
   name: r.name as string, description: r.description as string,
-  original_key: r.original_ext ? `amis/images/originals/${r.aid}.${r.original_ext}` : null,
-  original_ext: r.original_ext as string | null,
+  // 元の画像は持ってこない (Amis は表示用の WebP しか置かない)
+  original_key: null,
+  original_ext: null,
   variant_type: r.variant_type as string | null,
   status: r.status as number, visibility: r.visibility as number, ...ratings(r),
   meta: json(r.meta, "{}"), ...stamps(r),
@@ -225,8 +227,16 @@ insert("plot_likes", plotLikes.map((r) => ({ account_id: r.account_id as number,
 
 await conn.end();
 
+// 表示用の WebP を、本体のバケットから Amis のバケットへ同じキーでコピーする。
+// 削除済みの画像は本体が private/ へ移して隠しているので持ってこない (Amis でも代わりの画像になる)
+const copies = images
+  .filter((r) => r.variant_type && r.status !== 2)
+  .map((r) => `images/variants/${r.aid}.webp`);
+const copyList = `${out.replace(/\.sql$/, "")}.images.txt`;
 writeFileSync(out, `${statements.join("\n\n")}\n`);
+writeFileSync(copyList, copies.length === 0 ? "" : `${copies.join("\n")}\n`);
 console.log(`${out}: ${statements.length} statements`);
+console.log(`${copyList}: ${copies.length} images to copy`);
 for (const [name, rows] of Object.entries({
   images, ai_models: aiModels, characters, plots, lores, lore_entries: loreEntries, personas, chats,
   chat_messages: messages, ai_usages: aiUsages, plot_characters: plotCharacters, character_images: characterImages,

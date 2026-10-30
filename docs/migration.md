@@ -40,7 +40,16 @@
 1. ステージングで、本番 MariaDB のコピーから D1 へ流し込むスクリプトを何度か試し、件数と中身が合うか確かめる
 2. 本番の切り替え
    1. Amis を書き込み停止にする (メンテナンス表示)
-   2. `amis_*` と AI 系のテーブルを D1 に流し込む。画像は `images` から `amis_images` に移し、R2 のオブジェクトを `amis/` 配下にコピーする
+   2. `amis_*` と AI 系のテーブルを D1 に流し込む (`scripts/import-from-main.ts`)。画像は Amis が参照しているものだけを `images` に移し、表示用の WebP を `scripts/copy-images.ts` で本体のバケットから Amis のバケット (`amis-media`) へ同じキーでコピーする。元の画像と、削除済み (本体が `private/` に移したもの) の画像はコピーしない
+
+      ```sh
+      node scripts/import-from-main.ts import.sql            # import.sql と import.images.txt ができる
+      wrangler d1 execute amis --remote --file import.sql
+      S3_API_ENDPOINT=https://<アカウント ID>.r2.cloudflarestorage.com S3_REGION=auto S3_BUCKET=amiverse AMIS_BUCKET=amis-media \
+        S3_USERNAME=... S3_PASSWORD=... node scripts/copy-images.ts import.images.txt
+      ```
+
+      R2 の API トークンには、`amiverse` の読み取りと `amis-media` の書き込みを付ける。公開の配信 (`AMIS_MEDIA_URL`) で `images/variants/` が読めることも確かめる
    3. Gateway で `/v1/amis/*` と `/og/amis/*` の振り分け先を Amis Worker に切り替える
 3. しばらく様子を見て問題がなければ、本体から Amis 関連のコードとテーブルを消す (下の一覧)
 

@@ -11,7 +11,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate:local": "wrangler d1 migrations apply amis --local",
     "db:reset:local": "rm -rf .wrangler/state/v3/d1 && wrangler d1 migrations apply amis --local",
-    "db:import:local": "npm run db:reset:local && node scripts/import-from-main.ts .wrangler/import.sql && wrangler d1 execute amis --local --file .wrangler/import.sql"
+    "db:import:local": "npm run db:reset:local && node scripts/import-from-main.ts .wrangler/import.sql && wrangler d1 execute amis --local --file .wrangler/import.sql && npm run images:copy:local",
+    "images:copy:local": "node --env-file=../amiverse/.env scripts/copy-images.ts --local .wrangler/import.images.txt"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.4",
@@ -22,6 +23,7 @@
     "@cloudflare/vitest-plugin": "^1.4.9",
     "@cloudflare/workers-types": "^5.20261026.1",
     "@types/node": "^24.19.2",
+    "aws4fetch": "^1.0.20",
     "drizzle-kit": "^0.31.11",
     "typescript": "^6.0.3",
     "vitest": "^5.0.5",
