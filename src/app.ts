@@ -15,6 +15,7 @@ import { chatRoutes } from "./routes/chats";
 import { messageRoutes } from "./routes/messages";
 import { likeRoutes } from "./routes/likes";
 import { loreRoutes } from "./routes/lores";
+import { mediaRoutes } from "./routes/media";
 import { personaRoutes } from "./routes/personas";
 import { reportRoutes } from "./routes/reports";
 import { modelRoutes } from "./routes/models";
@@ -30,6 +31,9 @@ export type AppDeps = {
 
 export function createApp(deps: AppDeps = {}) {
   const app = new Hono<AppEnv>().basePath("/v1/amis");
+
+  // セッションも DB も要らないので、共通のミドルウェアより前に置く
+  app.route("/", mediaRoutes);
 
   app.use(corsPolicy, originCheck, d1Connection, mainDbConnection(deps.mainDb), currentAccount(deps.sessionSource));
 

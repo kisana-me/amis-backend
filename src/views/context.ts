@@ -9,7 +9,7 @@ import {
 import type { AppEnv } from "../env";
 import type { MainDb } from "../lib/main-db";
 import { maxRatingFor, type Viewer } from "../lib/ratings";
-import type { UrlEnv } from "../lib/urls";
+import type { AmisUrlEnv } from "../lib/urls";
 
 export type Character = typeof characters.$inferSelect;
 export type Plot = typeof plots.$inferSelect;
@@ -24,7 +24,7 @@ export type AiModel = typeof aiModels.$inferSelect;
 export type Cast = { plotCharacter: PlotCharacter; character: Character };
 
 export type ViewContext = {
-  env: UrlEnv;
+  env: AmisUrlEnv;
   // 見ている人に見せてよいレーティングの上限 (本体の amis_max_rating)
   maxRating: number;
   images: Map<number, Image>;
@@ -33,7 +33,7 @@ export type ViewContext = {
   casts: Map<number, Cast[]>;
 };
 
-export type Loaders = { db: Db; mainDb: MainDb; env: UrlEnv; viewer: Viewer };
+export type Loaders = { db: Db; mainDb: MainDb; env: AmisUrlEnv; viewer: Viewer };
 
 export function loadersOf(c: { var: AppEnv["Variables"]; env: AppEnv["Bindings"] }): Loaders {
   return { db: c.var.db, mainDb: c.var.mainDb, env: c.env, viewer: c.var.currentAccount };

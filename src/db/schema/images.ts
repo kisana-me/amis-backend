@@ -2,9 +2,9 @@ import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqli
 import { aid, jsonValid, meta, ratings, timestamps } from "./columns";
 import { CONTENT_STATUSES, VISIBILITIES } from "./enums";
 
-// 本体の images は使わず、Amis の画像だけを持つ。実体は R2 (本体と同じバケット) の
-//   amis/images/originals/{aid}.{ext}   アップロードされた元の画像
-//   amis/images/variants/{aid}.webp     表示用に変換したもの (本体の images/variants/{aid}.webp と同じ形)
+// 本体の images は使わず、Amis の画像だけを持つ。実体は Amis の R2 バケット (amis-media) の
+//   images/variants/{aid}.webp     表示用に変換したもの (本体のバケットと同じキー。移行は同じキーのままコピーする)
+// 元の画像は置かない (本体も今は残していない)。original_key / original_ext は使っていない
 export const images = sqliteTable("images", {
   id: integer("id").primaryKey(),
   aid: aid(),

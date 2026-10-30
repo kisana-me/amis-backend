@@ -9,7 +9,7 @@
 | 通知 (`notifications` / Web Push) | 本体 | internal API |
 | 週の原価上限・レート制限 | Amis | D1 / Rate Limiting |
 | AI モデル・利用記録 | Amis | D1 |
-| 画像 | Amis | D1 (`amis_images`) + R2 (`amis/`) + Images |
+| 画像 | Amis | D1 (`images`) + R2 (Amis 専用の `amis-media` バケット) + Images |
 | 通報・モデレーション | Amis | D1 + 管理画面 |
 | OG 画像 | Amis | workers-og |
 
@@ -65,10 +65,13 @@ amis_images: id, aid, account_id, status, visibility,
              user_rating, auto_rating, mod_rating, rating (生成カラム),
              original_key, original_ext, variant_type, width, height,
              created_at, updated_at
-R2 (本体と同じバケット):
-  amis/images/originals/{aid}.{ext}
-  amis/images/variants/{aid}.webp   (本体の images/variants/{aid}.webp と同じ形。variant_type が null なら未変換)
+R2 (Amis 専用の amis-media バケット):
+  images/variants/{aid}.webp   (本体のバケットと同じキー。variant_type が null なら未変換)
 ```
+
+- R2 は本体と分ける。Worker のバインディングが本体のメディア (投稿の画像や `private/` の削除済みのもの) に触れないようにするため。公開の配信も Amis のバケットに付けたドメイン (`AMIS_MEDIA_URL`) から行う。アカウントのアイコンは本体の画像なので、これまでどおり本体の公開バケット (`S3_PUBLIC_ENDPOINT`) を指す
+- 元の画像は置かない (本体も今は残していない)。`original_key` / `original_ext` は使っていない
+- ローカルの `wrangler dev` では、R2 はローカルの模擬 (`.wrangler/state`) になり公開の URL がないので、`GET /v1/amis/media/*` で Worker から配る (`.dev.vars` の `SERVE_LOCAL_MEDIA=true`)
 
 - アップロード時に Images バインディング (`env.IMAGES.input(...).transform(...).output(...)`) で変換し、R2 に保存する。必要になったときに作る遅延生成も同じ仕組みでできる
 - 画像を参照するのは `amis_plot_images`, `amis_character_images`, そして Plot / Character / Persona の `icon_id`。この参照先をすべて `amis_images` に向ける

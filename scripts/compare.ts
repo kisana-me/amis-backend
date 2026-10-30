@@ -11,6 +11,9 @@ const RAILS = process.env.RAILS_URL ?? "http://localhost:3001";
 const WORKER = process.env.WORKER_URL ?? "http://localhost:8787";
 const TOKEN = process.env.COMPARE_TOKEN ?? "";
 const workerHeaders: Record<string, string> = TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {};
+// 画像の公開 URL。キーは同じで、バケット (配る場所) だけが違う
+const RAILS_MEDIA = process.env.RAILS_MEDIA_URL ?? "http://localhost:9000/amiverse/";
+const WORKER_MEDIA = process.env.WORKER_MEDIA_URL ?? `${WORKER}/v1/amis/media/`;
 
 type Json = unknown;
 
@@ -81,8 +84,8 @@ function normalizeRails(path: string, json: Json): Json {
 }
 
 function normalizeWorker(json: Json): Json {
-  // Amis の画像は amis/ の下に置く (移行時に R2 でコピーする)
-  return walk(json, (v) => (typeof v === "string" ? v.replace("/amis/images/variants/", "/images/variants/") : v));
+  // Amis の画像は Amis のバケットに同じキーで置く (移行時に R2 でコピーする)
+  return walk(json, (v) => (typeof v === "string" ? v.replace(WORKER_MEDIA, RAILS_MEDIA) : v));
 }
 
 // Rails のリクエストを、Worker で同じ結果になる呼び方にする。分けたり統合したりしたエンドポイントは組み立て直す

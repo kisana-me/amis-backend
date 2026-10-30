@@ -11,7 +11,12 @@ export type Bindings = AiEnv & {
   SEND_LIMITER: RateLimit;
   MEDIA: R2Bucket;
   IMAGES: ImagesBinding;
+  // 本体の公開バケットの URL (アカウントのアイコン)
   S3_PUBLIC_ENDPOINT: string;
+  // Amis のバケット (amis-media) の公開 URL (キャラ・プロット・ペルソナの画像)
+  AMIS_MEDIA_URL: string;
+  // wrangler dev だけで "true" にする。ローカルの R2 の画像を Worker から配る (routes/media.ts)
+  SERVE_LOCAL_MEDIA?: string;
   BACK_URL: string;
   MAIN_DB_TIMEZONE: string;
   // CORS と CSRF (Origin の確認) で許可するフロントのオリジン。カンマ区切り

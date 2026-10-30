@@ -1,5 +1,5 @@
 // アップロードされた画像を変換して R2 に置き、images の行を作る (本体の Image#image_upload と ImageProcessable)。
-// 本体と同じく、元の画像は残さず表示用の WebP だけを置く (amis/images/variants/{aid}.webp)
+// 本体と同じく、元の画像は残さず表示用の WebP だけを置く (images/variants/{aid}.webp。本体と同じキー)
 import { images } from "../db/schema";
 import { newAid } from "../lib/aid";
 
@@ -61,6 +61,6 @@ export async function storeImage(
   const processed = await deps.process(file, variant);
   const aid = newAid();
   const body = processed.body instanceof ArrayBuffer ? processed.body : await new Response(processed.body).arrayBuffer();
-  await deps.media.put(`amis/images/variants/${aid}.webp`, body, { httpMetadata: { contentType: "image/webp" } });
+  await deps.media.put(`images/variants/${aid}.webp`, body, { httpMetadata: { contentType: "image/webp" } });
   return { aid, accountId, variantType: variant, width: processed.width, height: processed.height };
 }

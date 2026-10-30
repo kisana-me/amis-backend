@@ -42,8 +42,8 @@ describe("キャラの作成・更新・削除", () => {
     });
     expect(res.character.images.map((i: any) => [i.situation, i.secret])).toEqual([["笑顔", false], ["涙", true]]);
     expect(processed.slice(-3)).toEqual(["amis-character", "amis-character", "amis-character"]);
-    const keys = (await env.MEDIA.list({ prefix: "amis/images/variants/" })).objects.map((o) => o.key);
-    expect(keys).toContain(res.character.icon_url.replace("https://media.example.test/", ""));
+    const keys = (await env.MEDIA.list({ prefix: "images/variants/" })).objects.map((o) => o.key);
+    expect(keys).toContain(res.character.icon_url.replace("https://amis-media.example.test/", ""));
   });
 
   it("更新では渡したキーだけを変え、画像は並べ替え・削除・追加を 1 回で同期する", async () => {

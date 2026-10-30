@@ -33,7 +33,7 @@ Amis Worker ──▶ D1 (amis)        R2 (amis/ 配下)     Images      AI Gate
 | 定期実行 | Cron Triggers | `SweepGuestsJob` / `SweepStalledMessagesJob` の置き換え |
 | 段数の多い処理 | Workflows (必要なら) | `ChapterSummaryJob` など |
 | AI | AI Gateway | Rails の `AiClient` の provider 定義をそのまま TS の fetch に移す |
-| 画像 | Images バインディング + R2 | `amis/images/originals/`、`amis/images/variants/` |
+| 画像 | Images バインディング + R2 | Amis 専用のバケット `amis-media` の `images/variants/` |
 | OG 画像 | workers-og (satori + resvg-wasm) | 日本語フォントはサブセット化して R2 に置く |
 | レート制限 | Rate Limiting バインディング | 1 分あたり 10 通。Redis の INCR の置き換え |
 | キャッシュ | KV または Cache API | 週の原価の集計 |

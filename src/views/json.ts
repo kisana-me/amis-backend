@@ -2,13 +2,13 @@
 import { authorJson } from "../accounts/accounts";
 import { CONTENT_STATUSES, RATINGS } from "../db/schema";
 import { ratingLabel } from "../lib/ratings";
-import { objectUrl, staticImageUrl } from "../lib/urls";
+import { amisObjectUrl, staticImageUrl } from "../lib/urls";
 import type { Cast, Character, Image, Lore, LoreEntry, Persona, Plot, ViewContext } from "./context";
 
 // 本体の Image#image_url。変換が済んでいて、正常で、rejected でなければ実体を指す
 export function imageUrl(image: Image, ctx: ViewContext): string {
   const usable = image.status === CONTENT_STATUSES.normal && !!image.variantType?.trim() && image.rating !== RATINGS.rejected;
-  return usable ? objectUrl(ctx.env, `amis/images/variants/${image.aid}.webp`) : staticImageUrl(ctx.env, "amiverse-1.webp");
+  return usable ? amisObjectUrl(ctx.env, `images/variants/${image.aid}.webp`) : staticImageUrl(ctx.env, "amiverse-1.webp");
 }
 
 // 本体の Image#display_url。見ている人に見せられないレーティングなら代わりの画像

@@ -34,7 +34,7 @@ describe("POST /characters", () => {
     const open = list.find((c) => c.name === "公開定義")!;
     expect(open).toEqual({
       aid: expect.any(String), name: "公開定義", tagline: "一言", description: "",
-      icon_url: `https://media.example.test/amis/images/variants/${icon.aid}.webp`,
+      icon_url: `https://amis-media.example.test/images/variants/${icon.aid}.webp`,
       rating: "general", official: false,
       author: { name: "なまえ1", name_id: "user1", icon_url: "https://media.example.test/images/variants/authoricon.webp" },
       leads_count: 0, chats_count: 0, likes_count: 0, allow_fork: false, persona: "見える定義",
@@ -82,7 +82,7 @@ describe("POST /characters/:aid", () => {
     expect(body.character.images.map((i: Json) => i.aid)).toEqual([icon.aid, extra.aid, nsfw.aid]);
     expect(body.character.images[1]).toEqual({
       type: "image", aid: extra.aid, name: "立ち絵", description: "",
-      url: `https://media.example.test/amis/images/variants/${extra.aid}.webp`, rating: "general",
+      url: `https://amis-media.example.test/images/variants/${extra.aid}.webp`, rating: "general",
     });
     expect(body.character).toMatchObject({ messages_count: 7, casts_count: 2, liked: false });
 

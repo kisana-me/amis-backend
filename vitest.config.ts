@@ -12,6 +12,7 @@ export default defineConfig(async () => {
         miniflare: {
           bindings: {
             S3_PUBLIC_ENDPOINT: "https://media.example.test",
+            AMIS_MEDIA_URL: "https://amis-media.example.test",
             BACK_URL: "https://api.example.test",
             ALLOWED_ORIGINS: "https://front.example.test, http://localhost:3000",
             TEST_MIGRATIONS: migrations,
