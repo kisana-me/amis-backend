@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, ne, notInArray, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, lt, max, ne, notInArray, or, type SQL, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import type { Db } from "../db/client";
 import { inChunks } from "../db/client";
@@ -25,6 +25,8 @@ import { chapterDefinitions, imageDisplayUrl, leadCast, openingImageAids, openin
 import { paletteFor, type SceneImageRow, sceneImageCandidates } from "../views/palette";
 
 const LIMIT = 30;
+// チャットを開いたときと、上へ遡るときに 1 回で返すメッセージの数
+const MESSAGE_LIMIT = 30;
 
 export const chatRoutes = new Hono<AppEnv>();
 
@@ -60,16 +62,35 @@ async function chatViews(c: Parameters<typeof loadersOf>[0], rows: Chat[], extra
   };
 }
 
-// 本体の chats#index。tab: "archived" ならアーカイブだけ、それ以外はアーカイブ以外
+// 一覧の次のページのカーソル。最後にメッセージした時刻 (まだなければ none) とチャットの id を "." でつなぐ
+const chatCursor = (chat: Chat) => `${chat.lastMessageAt?.getTime() ?? "none"}.${chat.id}`;
+
+// カーソルより後ろ (古い側) のチャット。並びは last_message_at の新しい順で、null は最後 (SQLite の降順)。同じなら id の大きい順
+function olderChats(cursor: unknown): SQL | undefined {
+  if (typeof cursor !== "string") return undefined;
+  const [at, idText] = cursor.split(".");
+  const id = Number(idText);
+  if (!Number.isInteger(id)) return undefined;
+  if (at === "none") return and(isNull(chats.lastMessageAt), lt(chats.id, id));
+  const time = new Date(Number(at));
+  if (Number.isNaN(time.getTime())) return undefined;
+  return or(lt(chats.lastMessageAt, time), and(eq(chats.lastMessageAt, time), lt(chats.id, id)), isNull(chats.lastMessageAt));
+}
+
+// 本体の chats#index。tab: "archived" ならアーカイブだけ、それ以外はアーカイブ以外。
+// 30 件ずつ。続きがあれば X-Next-Cursor を付け、cursor に渡すとその続きを返す
 chatRoutes.post("/chats", requireSignin, async (c) => {
   const { db } = c.var;
-  const archived = (await jsonBody(c)).tab === "archived";
+  const body = await jsonBody(c);
+  const archived = body.tab === "archived";
   const rows = await db.select().from(chats)
     .where(and(
       eq(chats.accountId, c.var.currentAccount!.id),
       archived ? eq(chats.status, CHAT_STATUSES.archived) : notInArray(chats.status, [CHAT_STATUSES.archived, CHAT_STATUSES.deleted]),
+      olderChats(body.cursor),
     ))
     .orderBy(desc(chats.lastMessageAt), desc(chats.id)).limit(LIMIT);
+  if (rows.length === LIMIT) c.header("X-Next-Cursor", chatCursor(rows.at(-1)!));
 
   // 一覧では章名の代わりに最後の 1 通 (normal のうち id が最大のもの) を出す
   const normals = await inChunks(rows.map((r) => r.id), (chunk) =>
@@ -144,18 +165,48 @@ chatRoutes.post("/chats/:aid", requireSignin, async (c) => {
   return c.json(await chatShowJson(c, chat));
 });
 
-// chats/show.json.jbuilder。開始・設定の変更のあとも同じ形で返す
+// それより前のメッセージ。会話ログを上へ遡るときに使う。
+// cursor は今見えているいちばん古いメッセージの aid (チャットを開いたときの older_messages_cursor か、この API の X-Next-Cursor)
+chatRoutes.post("/chats/:aid/history", requireSignin, async (c) => {
+  const { db } = c.var;
+  const chat = await findChat(db, c.req.param("aid"), c.var.currentAccount!.id);
+  if (!chat) return notFound(c, "チャットが見つかりませんでした");
+  const cursor = (await jsonBody(c)).cursor;
+  const [before] = typeof cursor === "string"
+    ? await db.select({ id: chatMessages.id }).from(chatMessages).where(and(eq(chatMessages.chatId, chat.id), eq(chatMessages.aid, cursor))).limit(1)
+    : [];
+  if (!before) return notFound(c, "メッセージが見つかりませんでした");
+
+  const { page, olderCursor } = await messagePage(db, chat.id, before.id);
+  if (olderCursor) c.header("X-Next-Cursor", olderCursor);
+  return c.json({ status: "success", messages: page.map(messageJson) });
+});
+
+// 表示するメッセージを、新しい側から 1 ページ (beforeId があればそれより古いものだけ)。古い順に並べ直して返す。
+// olderCursor は、まだ前があるときのいちばん古いメッセージの aid
+async function messagePage(db: Db, chatId: number, beforeId?: number) {
+  const rows = await db.select().from(chatMessages)
+    .where(and(
+      eq(chatMessages.chatId, chatId),
+      notInArray(chatMessages.status, HIDDEN_MESSAGE_STATUSES),
+      beforeId === undefined ? undefined : lt(chatMessages.id, beforeId),
+    ))
+    .orderBy(desc(chatMessages.id)).limit(MESSAGE_LIMIT + 1);
+  const page = rows.slice(0, MESSAGE_LIMIT).reverse();
+  return { page, olderCursor: rows.length > MESSAGE_LIMIT ? page[0].aid : null };
+}
+
+// chats/show.json.jbuilder。開始・設定の変更のあとも同じ形で返す。メッセージは新しい側の 1 ページだけ
 export async function chatShowJson(c: Parameters<typeof loadersOf>[0], chat: Chat) {
   const { db } = c.var;
   const account = c.var.currentAccount!;
   // 止まっている生成はここで失敗に倒す。でないと「生成中です」のまま送れなくなる
   const pending = await pendingMessage(db, chat.id);
-  const [[plot], all, spent] = await Promise.all([
+  const [[plot], { page: visible, olderCursor }, spent] = await Promise.all([
     db.select().from(plots).where(eq(plots.id, chat.plotId)).limit(1),
-    db.select().from(chatMessages).where(eq(chatMessages.chatId, chat.id)).orderBy(asc(chatMessages.id)),
+    messagePage(db, chat.id),
     weeklyCostMicro(db, account.id),
   ]);
-  const visible = all.filter((m) => !HIDDEN_MESSAGE_STATUSES.includes(m.status as never));
 
   const sceneImageRows = await sceneImageCandidates(db, plot);
   const views = await chatViews(c, [chat], sceneImageRows.map((r) => r.imageId));
@@ -172,8 +223,9 @@ export async function chatShowJson(c: Parameters<typeof loadersOf>[0], chat: Cha
       ...sceneImagesJson(plot, sceneImageRows, views.ctx),
     },
     messages: visible.map(messageJson),
+    older_messages_cursor: olderCursor,
     pending_message_aid: pending?.aid ?? null,
-    variant_aids: variantAids(visible, all),
+    variant_aids: await variantAids(db, chat.id, visible),
     quota: { weekly_usage_percent: usagePercent(spent, Number(c.env.WEEKLY_COST_LIMIT_MICRO)) },
   };
 }
@@ -276,10 +328,15 @@ function sceneImagesJson(plot: Plot, rows: SceneImageRow[], ctx: ViewContext) {
   return Object.keys(table).length > 0 ? { scene_images: table } : {};
 }
 
-// 末尾の返答をやり直してできた兄弟。1 本しかなければ空 (本体の ChatsController#variant_aids)
-function variantAids(visible: ChatMessage[], all: ChatMessage[]): string[] {
+// 末尾の返答をやり直してできた兄弟。1 本しかなければ空 (本体の ChatsController#variant_aids)。
+// 兄弟はどれも、その返答を求めた直前のユーザーの発言より後ろにあるので、そこから先だけを読む
+async function variantAids(db: Db, chatId: number, visible: ChatMessage[]): Promise<string[]> {
   const tail = [...visible].reverse().find(isVisibleAssistant);
   if (!tail) return [];
-  const list = variantChain(tail, all);
+  const [prompt] = await db.select({ id: max(chatMessages.id) }).from(chatMessages)
+    .where(and(eq(chatMessages.chatId, chatId), eq(chatMessages.role, MESSAGE_ROLES.user), lt(chatMessages.id, tail.id)));
+  const around = await db.select().from(chatMessages)
+    .where(and(eq(chatMessages.chatId, chatId), gt(chatMessages.id, prompt?.id ?? 0)));
+  const list = variantChain(tail, around);
   return list.length > 1 ? list.map((m) => m.aid) : [];
 }

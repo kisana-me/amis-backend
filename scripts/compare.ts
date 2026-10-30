@@ -66,6 +66,10 @@ function normalizeRails(path: string, json: Json): Json {
     const chapters = (json.plot.chapters as Record<string, unknown>[]).map(({ endings: _e, ...chapter }) => chapter);
     return { ...json, plot: { ...json.plot, chapters } };
   }
+  // Worker のチャットはメッセージを新しい側の 30 件だけ返す (前は /chats/:aid/history で遡る)
+  if (/^\/chats\/[^/]+$/.test(path) && isObject(json) && Array.isArray(json.messages)) {
+    json = { ...json, messages: json.messages.slice(-30) };
+  }
   // チャットの結末とコイン・無料枠も廃止
   if (path.startsWith("/chats") && isObject(json)) {
     const chat = ({ ending_key: _k, ending_title: _t, ...rest }: Record<string, unknown>) => rest;
@@ -113,8 +117,15 @@ async function postWorker(path: string, body: Json): Promise<{ status: number; j
       return selectable("/characters", "characters", { castable: true, include: ["images"] });
     case "/lores/selectable":
       return selectable("/lores", "lores", { attachable: true });
-    default:
-      return call(path, body);
+    default: {
+      const res = await call(path, body);
+      // 遡るためのカーソルは Worker にだけある
+      if (/^\/chats\/[^/]+$/.test(path) && isObject(res.json)) {
+        const { older_messages_cursor: _c, ...rest } = res.json;
+        return { ...res, json: rest };
+      }
+      return res;
+    }
   }
 }
 

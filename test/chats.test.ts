@@ -49,6 +49,27 @@ describe("POST /chats", () => {
   });
 });
 
+describe("POST /chats のページ送り", () => {
+  it("30 件ずつ X-Next-Cursor で続きを引く。最後にメッセージしていないものは後ろに並ぶ", async () => {
+    const dated = [];
+    for (let i = 0; i < 29; i++) dated.push(await insertChat({ lastMessageAt: new Date(10_000 + i * 1000) }));
+    // 同じ時刻のものは id の大きい順
+    const tieA = await insertChat({ lastMessageAt: new Date(5000) });
+    const tieB = await insertChat({ lastMessageAt: new Date(5000) });
+    const blank = await insertChat({ lastMessageAt: null });
+
+    const first = await app().post("/chats", { token: "me" });
+    const cursor = first.headers.get("X-Next-Cursor");
+    const page1 = ((await first.json()) as any).chats.map((c: any) => c.aid);
+    expect(page1).toEqual([...dated.map((c) => c.aid).reverse(), tieB.aid]);
+    expect(cursor).toBe(`5000.${tieB.id}`);
+
+    const second = await app().post("/chats", { token: "me", body: { cursor } });
+    expect(((await second.json()) as any).chats.map((c: any) => c.aid)).toEqual([tieA.aid, blank.aid]);
+    expect(second.headers.get("X-Next-Cursor")).toBeNull();
+  });
+});
+
 describe("POST /chats/:aid", () => {
   it("他人のチャットは 404", async () => {
     const chat = await insertChat();
@@ -73,6 +94,41 @@ describe("POST /chats/:aid", () => {
     expect(body.variant_aids).toEqual([first.aid, second.aid, third.aid]);
     expect(body.quota).toEqual({ weekly_usage_percent: 0 });
     expect(body.chat).not.toHaveProperty("scene_images");
+  });
+
+  it("メッセージは新しい側の 30 件だけ返し、前があれば older_messages_cursor を付ける。/history で遡る", async () => {
+    const chat = await insertChat();
+    const rows = [];
+    for (let i = 0; i < 65; i++) {
+      rows.push(await message(chat.id, { role: i % 2 === 0 ? MESSAGE_ROLES.user : MESSAGE_ROLES.assistant, content: [{ speaker: null, text: `${i}` }] }));
+      // 隠したものは数えない
+      if (i === 40) await message(chat.id, { status: MESSAGE_STATUSES.replaced });
+    }
+    const texts = (messages: any[]) => messages.map((m) => m.scene[0].text);
+    const range = (from: number, to: number) => Array.from({ length: to - from }, (_, i) => `${from + i}`);
+
+    const body = await app().json(`/chats/${chat.aid}`, { token: "me" });
+    expect(texts(body.messages)).toEqual(range(35, 65));
+    expect(body.older_messages_cursor).toBe(rows[35].aid);
+
+    const page2 = await app().post(`/chats/${chat.aid}/history`, { token: "me", body: { cursor: body.older_messages_cursor } });
+    expect(texts(((await page2.json()) as any).messages)).toEqual(range(5, 35));
+    const cursor = page2.headers.get("X-Next-Cursor");
+    expect(cursor).toBe(rows[5].aid);
+
+    const page3 = await app().post(`/chats/${chat.aid}/history`, { token: "me", body: { cursor } });
+    expect(texts(((await page3.json()) as any).messages)).toEqual(range(0, 5));
+    expect(page3.headers.get("X-Next-Cursor")).toBeNull();
+
+    // 他人のチャットと、知らないカーソルは 404
+    expect((await app().post(`/chats/${chat.aid}/history`, { token: "other", body: { cursor } })).status).toBe(404);
+    expect((await app().post(`/chats/${chat.aid}/history`, { token: "me", body: { cursor: "nope" } })).status).toBe(404);
+  });
+
+  it("前のページがなければ older_messages_cursor は null", async () => {
+    const chat = await insertChat();
+    await message(chat.id);
+    expect((await app().json(`/chats/${chat.aid}`, { token: "me" })).older_messages_cursor).toBeNull();
   });
 
   it("scene_images には説明の付いた絵と、導入で名指しされた絵だけが載る", async () => {
