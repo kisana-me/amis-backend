@@ -40,7 +40,7 @@
 1. ステージングで、本番 MariaDB のコピーから D1 へ流し込むスクリプトを何度か試し、件数と中身が合うか確かめる
 2. 本番の切り替え
    1. Amis を書き込み停止にする (メンテナンス表示)
-   2. `amis_*` と AI 系のテーブルを D1 に流し込む (`scripts/import-from-main.ts`)。画像は Amis が参照しているものだけを `images` に移し、表示用の WebP を `scripts/copy-images.ts` で本体のバケットから Amis のバケット (`amis-media`) へ同じキーでコピーする。元の画像と、削除済み (本体が `private/` に移したもの) の画像はコピーしない
+   2. `amis_*` と AI 系のテーブルを D1 に流し込む (`scripts/import-from-main.ts`)。画像は Amis が参照しているものだけを `images` に移し、表示用の WebP を `scripts/copy-images.ts` で本体のバケットから Amis のバケット (`amis-media`) へ同じキーでコピーする。元の画像と、削除済み (本体が `private/` に移したもの) の画像はコピーしない。通報 (本体の `reports` のうち Amis のもの) と画像の判定結果は持ってこない
 
       ```sh
       node scripts/import-from-main.ts import.sql            # import.sql と import.images.txt ができる

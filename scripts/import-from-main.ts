@@ -10,9 +10,11 @@
 // - id は本体と同じ値を使う。参照をそのまま保てて、突き合わせもしやすい
 // - 本体の DATETIME はタイムゾーンなしの JST なので、epoch ミリ秒に直す
 // - 廃止したもの (ゲストのチャット、結末、コイン) は持ってこない
+// - 通報は持ってこない (Amis で受け付けた分から始める)
+// - チャットとメッセージ、AI の利用記録は多いので、id の順に区切って読み、読んだそばから書く (全件をメモリに載せない)
 // - 画像は Amis から参照されているものだけを持ってくる。R2 のファイルは別にコピーする。
 //   コピーするキーの一覧を <出力先>.images.txt に書くので、scripts/copy-images.ts に渡す
-import { writeFileSync } from "node:fs";
+import { closeSync, openSync, writeFileSync, writeSync } from "node:fs";
 import { createConnection } from "mysql2/promise";
 
 type Row = Record<string, unknown>;
@@ -25,7 +27,10 @@ if (!out) throw new Error("出力先の .sql を指定してください");
 const conn = await createConnection({ uri: url, timezone: "+09:00", dateStrings: false, supportBigNumbers: true, bigNumberStrings: false });
 const select = async (sql: string, params: unknown[] = []) => (await conn.query(sql, params))[0] as Row[];
 
-const statements: string[] = [];
+const fd = openSync(out, "w");
+let statementCount = 0;
+// テーブルごとに書いた行数 (確かめるときに D1 の count(*) と比べる)
+const counts = new Map<string, number>();
 // D1 は 1 文が 100KB まで。INSERT の頭の分を残しておく
 const MAX_STATEMENT_BYTES = 90_000;
 
@@ -38,6 +43,7 @@ function literal(value: Value): string {
 }
 
 function insert(table: string, rows: Record<string, Value>[]) {
+  counts.set(table, (counts.get(table) ?? 0) + rows.length);
   if (rows.length === 0) return;
   const columns = Object.keys(rows[0]);
   const head = `INSERT INTO ${table} (${columns.join(", ")}) VALUES\n`;
@@ -45,7 +51,9 @@ function insert(table: string, rows: Record<string, Value>[]) {
   let values: string[] = [];
   let size = 0;
   const flush = () => {
-    if (values.length > 0) statements.push(`${head}${values.join(",\n")};`);
+    if (values.length === 0) return;
+    writeSync(fd, `${head}${values.join(",\n")};\n\n`);
+    statementCount += 1;
     values = [];
     size = 0;
   };
@@ -80,16 +88,20 @@ const lores = await select("SELECT * FROM amis_lores ORDER BY id");
 const loreEntries = await select("SELECT * FROM amis_lore_entries ORDER BY id");
 const plotLores = await select("SELECT * FROM amis_plot_lores ORDER BY id");
 const personas = await select("SELECT * FROM amis_personas ORDER BY id");
-// ゲストのチャットは持ってこない
-const chats = await select("SELECT * FROM amis_chats WHERE account_id IS NOT NULL ORDER BY id");
-const chatIds = new Set(chats.map((c) => c.id));
-const messages = (await select("SELECT * FROM amis_chat_messages ORDER BY id")).filter((m) => chatIds.has(m.chat_id));
-const messageById = new Map(messages.map((m) => [m.id, m]));
 const characterLikes = await select("SELECT * FROM amis_character_likes ORDER BY id");
 const plotLikes = await select("SELECT * FROM amis_plot_likes ORDER BY id");
 const aiModels = await select("SELECT * FROM ai_models ORDER BY id");
-// DM の AI は廃止したので、Amis の分だけ
-const aiUsages = await select("SELECT * FROM ai_usages WHERE amis_chat_id IS NOT NULL ORDER BY id");
+
+// 大きいテーブルを id の順に BATCH 行ずつ読む。sql は WHERE まで書き、読む表の別名を t にする
+const BATCH = 2000;
+async function eachBatch(sql: string, write: (rows: Row[]) => void) {
+  for (let after = 0; ;) {
+    const rows = await select(`${sql} AND t.id > ? ORDER BY t.id LIMIT ${BATCH}`, [after]);
+    if (rows.length === 0) return;
+    write(rows);
+    after = rows.at(-1)!.id as number;
+  }
+}
 
 const imageIds = new Set<unknown>([
   ...characters.map((r) => r.icon_id), ...plots.map((r) => r.icon_id), ...personas.map((r) => r.icon_id),
@@ -171,7 +183,8 @@ insert("personas", personas.map((r) => ({
   is_default: bool(r.is_default), position: r.position as number, status: r.status as number, ...stamps(r),
 })));
 
-insert("chats", chats.map((r) => ({
+// ゲストのチャットは持ってこない
+await eachBatch("SELECT t.* FROM amis_chats t WHERE t.account_id IS NOT NULL", (rows) => insert("chats", rows.map((r) => ({
   id: r.id as number, aid: r.aid as string, account_id: r.account_id as number, plot_id: r.plot_id as number,
   persona_id: r.persona_id as number | null, ai_model_id: r.ai_model_id as number | null,
   title: r.title as string, status: r.status as number, reply_style: r.reply_style as number, choice_mode: bool(r.choice_mode),
@@ -179,31 +192,41 @@ insert("chats", chats.map((r) => ({
   finished_at: r.finished_at as Date | null, summaries: json(r.summaries, "[]"),
   messages_count: r.messages_count as number, last_message_at: r.last_message_at as Date | null,
   meta: json(r.meta, "{}"), ...stamps(r),
-})));
+}))));
 
-insert("chat_messages", messages.map((r) => ({
+await eachBatch(
+  "SELECT t.* FROM amis_chat_messages t JOIN amis_chats c ON c.id = t.chat_id WHERE c.account_id IS NOT NULL",
+  (rows) => insert("chat_messages", rows.map((r) => ({
   id: r.id as number, aid: r.aid as string, chat_id: r.chat_id as number, role: r.role as number, status: r.status as number,
   content: json(r.content, "[]"), chapter_key: r.chapter_key as string,
   speaker_character_id: r.speaker_character_id as number | null, replaced_by_id: r.replaced_by_id as number | null,
   ai_model_id: r.ai_model_id as number | null, ...ratings(r),
   streamed_at: r.streamed_at as Date | null, meta: json(r.meta, "{}"), ...stamps(r),
-})));
+  }))),
+);
 
+// DM の AI は廃止したので、Amis の分だけ。持ってこなかったチャット (ゲスト) を指すものは参照を外す。
 // 応答時間と終わり方は、本体ではメッセージに持っていた。D1 では ai_usages に置く
-insert("ai_usages", aiUsages.map((r) => {
-  const message = messageById.get(r.amis_chat_message_id);
+await eachBatch(`
+  SELECT t.*, c.id AS kept_chat_id, m.id AS kept_message_id,
+    m.finish_reason AS message_finish_reason, m.ttft_ms AS message_ttft_ms, m.latency_ms AS message_latency_ms
+  FROM ai_usages t
+  LEFT JOIN amis_chats c ON c.id = t.amis_chat_id AND c.account_id IS NOT NULL
+  LEFT JOIN amis_chat_messages m ON m.id = t.amis_chat_message_id AND c.id IS NOT NULL
+  WHERE t.amis_chat_id IS NOT NULL`, (rows) => insert("ai_usages", rows.map((r) => {
+  const message = r.kept_message_id !== null;
   return {
     id: r.id as number, account_id: r.account_id as number | null, ai_model_id: r.ai_model_id as number | null,
-    chat_id: chatIds.has(r.amis_chat_id) ? (r.amis_chat_id as number) : null,
-    chat_message_id: message ? (r.amis_chat_message_id as number) : null,
+    chat_id: r.kept_chat_id as number | null,
+    chat_message_id: message ? (r.kept_message_id as number) : null,
     purpose: r.purpose as number, prompt_tokens: r.prompt_tokens as number | null, cached_tokens: r.cached_tokens as number | null,
     completion_tokens: r.completion_tokens as number | null, reasoning_tokens: r.reasoning_tokens as number | null,
     cost_micro: r.cost_micro === null ? null : Number(r.cost_micro), gateway_log_id: r.gateway_log_id as string | null,
-    finish_reason: (message?.finish_reason as string | null) ?? null,
-    ttft_ms: (message?.ttft_ms as number | null) ?? null, latency_ms: (message?.latency_ms as number | null) ?? null,
+    finish_reason: message ? (r.message_finish_reason as string | null) : null,
+    ttft_ms: message ? (r.message_ttft_ms as number | null) : null, latency_ms: message ? (r.message_latency_ms as number | null) : null,
     created_at: r.created_at as Date,
   };
-}));
+})));
 
 insert("plot_characters", plotCharacters.map((r) => ({
   id: r.id as number, plot_id: r.plot_id as number, character_id: r.character_id as number,
@@ -233,12 +256,8 @@ const copies = images
   .filter((r) => r.variant_type && r.status !== 2)
   .map((r) => `images/variants/${r.aid}.webp`);
 const copyList = `${out.replace(/\.sql$/, "")}.images.txt`;
-writeFileSync(out, `${statements.join("\n\n")}\n`);
+closeSync(fd);
 writeFileSync(copyList, copies.length === 0 ? "" : `${copies.join("\n")}\n`);
-console.log(`${out}: ${statements.length} statements`);
+console.log(`${out}: ${statementCount} statements`);
 console.log(`${copyList}: ${copies.length} images to copy`);
-for (const [name, rows] of Object.entries({
-  images, ai_models: aiModels, characters, plots, lores, lore_entries: loreEntries, personas, chats,
-  chat_messages: messages, ai_usages: aiUsages, plot_characters: plotCharacters, character_images: characterImages,
-  plot_images: plotImages, plot_lores: plotLores, character_likes: characterLikes, plot_likes: plotLikes,
-})) console.log(`  ${name}: ${rows.length}`);
+for (const [name, n] of counts) console.log(`  ${name}: ${n}`);
