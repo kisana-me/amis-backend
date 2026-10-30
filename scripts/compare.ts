@@ -4,12 +4,13 @@
 //   COMPARE_TOKEN=<セッショントークン> node scripts/compare.ts [パス[:JSON本文]] ...
 //   パスを省くと、決まった一式 (status、キャラの一覧と全件の詳細など) を比べる
 //
-// 意図して変えたところ (廃止した項目、画像の置き場所) は、比べる前にそろえる
+// 意図して変えたところ (廃止した項目、画像の置き場所、分けたり統合したりしたエンドポイント) は、比べる前にそろえる
 export {};
 
 const RAILS = process.env.RAILS_URL ?? "http://localhost:3001";
 const WORKER = process.env.WORKER_URL ?? "http://localhost:8787";
 const TOKEN = process.env.COMPARE_TOKEN ?? "";
+const workerHeaders: Record<string, string> = TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {};
 
 type Json = unknown;
 
@@ -44,9 +45,10 @@ async function post(base: string, path: string, body: Json, headers: Record<stri
 
 function normalizeRails(path: string, json: Json): Json {
   if (path === "/status" && isObject(json) && "quota" in json) {
+    const { queue_position: _q, ...rest } = json;
     const quota = json.quota as Record<string, unknown> | undefined;
     return {
-      ...json,
+      ...rest,
       // コイン・無料枠・ボーナスは廃止。週の利用率だけを残す
       quota: quota ? { weekly_usage_percent: quota.weekly_usage_percent } : quota,
       models: (json.models as Record<string, unknown>[] | undefined)?.map(({ coin_cost: _c, ...m }) => m),
@@ -83,6 +85,36 @@ function normalizeWorker(json: Json): Json {
   return walk(json, (v) => (typeof v === "string" ? v.replace("/amis/images/variants/", "/images/variants/") : v));
 }
 
+// Rails のリクエストを、Worker で同じ結果になる呼び方にする。分けたり統合したりしたエンドポイントは組み立て直す
+async function postWorker(path: string, body: Json): Promise<{ status: number; json: Json }> {
+  const call = (p: string, b: Json = {}) => post(WORKER, p, b, workerHeaders);
+  const params = isObject(body) ? body : {};
+  // 自分のもの (非公開も) と、ほかの人の選べるもの。Worker は 2 回に分けて引き、自分のものを除く
+  const selectable = async (p: string, key: string, filter: Record<string, unknown>) => {
+    const [mine, others] = await Promise.all([call(p, { ...params, ...filter, author: "me", sort: "new", limit: 100 }), call(p, { ...params, ...filter, limit: 100 })]);
+    if (mine.status !== 200) return mine;
+    const rows = (r: typeof mine) => (isObject(r.json) ? (r.json[key] as { mine?: boolean }[]) : []);
+    return { status: others.status, json: { status: "success", mine: rows(mine), others: rows(others).filter((x) => !x.mine) } };
+  };
+  switch (path) {
+    case "/status": {
+      const [quota, models] = await Promise.all([call("/quota"), call("/models", params)]);
+      if (quota.status !== 200) return quota;
+      return { status: models.status, json: { status: "success", ...(quota.json as object), ...(models.json as object) } };
+    }
+    case "/home":
+      return call("/plots", { sort: params.tab ?? "popular", limit: 20 });
+    case "/lores":
+      return call("/lores", { author: "me", sort: "new" });
+    case "/characters/selectable":
+      return selectable("/characters", "characters", { castable: true, include: ["images"] });
+    case "/lores/selectable":
+      return selectable("/lores", "lores", { attachable: true });
+    default:
+      return call(path, body);
+  }
+}
+
 // --- 比べる -------------------------------------------------------------------
 
 function isObject(v: Json): v is Record<string, unknown> {
@@ -114,7 +146,6 @@ function diff(a: Json, b: Json, path = "", out: string[] = []): string[] {
 // --- 比べるリクエスト ---------------------------------------------------------
 
 const { headers: railsHeaders, nameId: myNameId } = await railsSession();
-const workerHeaders: Record<string, string> = TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {};
 
 const aidsOf = (json: Json, key: string) =>
   isObject(json) && Array.isArray(json[key]) ? (json[key] as { aid: string }[]).map((x) => x.aid) : [];
@@ -186,7 +217,7 @@ const targets: [string, Json][] = process.argv.length > 2
 
 let failed = 0;
 for (const [path, body] of targets) {
-  const [rails, worker] = await Promise.all([post(RAILS, path, body, railsHeaders), post(WORKER, path, body, workerHeaders)]);
+  const [rails, worker] = await Promise.all([post(RAILS, path, body, railsHeaders), postWorker(path, body)]);
   const differences = rails.status !== worker.status
     ? [`status: rails=${rails.status} worker=${worker.status}`]
     : diff(normalizeRails(path, rails.json), normalizeWorker(worker.json));
