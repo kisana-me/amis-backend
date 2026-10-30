@@ -1,5 +1,4 @@
-// 章が閉じるたびに要約を追記し、以降のプロンプトでは生の会話ではなくこれを渡す (本体の Amis::ChapterSummaryJob)。
-// 章の無い自由なチャットでは、同じ処理をローリング要約として使う。
+// 会話が伸びたら古いぶんを要約に畳んで追記し、以降のプロンプトでは生の会話ではなくこれを渡す (ローリング要約)。
 // 生成のリクエストの中で、done を送ったあとに waitUntil で走らせる
 import { and, asc, eq, gt, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
@@ -14,19 +13,17 @@ import { summarizedUptoId } from "./prompt-input";
 import { isPresent, rubyStrip } from "./ruby-text";
 
 const MAX_SOURCE_MESSAGES = 200;
-// ローリング要約で、畳まずに生のまま残す末尾のメッセージの数
+// 畳まずに生のまま残す末尾のメッセージの数
 const ROLLING_KEEP_MESSAGES = 24;
 
-export type SummaryMode = "chapter" | "rolling";
-
-export async function summarize(deps: { db: Db; env: Bindings; ownerName: string }, chatId: number, chapterKey: string | null, mode: SummaryMode) {
+export async function summarize(deps: { db: Db; env: Bindings; ownerName: string }, chatId: number) {
   const { db, env } = deps;
   try {
     const [chat] = await db.select().from(chats).where(eq(chats.id, chatId)).limit(1);
     if (!chat) return;
 
-    const { messages, uptoId } = await sourceMessages(db, chat, chapterKey, mode);
-    if (messages.length === 0) return;
+    const { messages, uptoId } = await sourceMessages(db, chat);
+    if (uptoId === null) return;
 
     const model = await usableModel(db, 0, await findModelById(db, chat.aiModelId));
     if (!model) return;
@@ -61,29 +58,23 @@ export async function summarize(deps: { db: Db; env: Bindings; ownerName: string
     const text = extract(raw);
     if (!text) return;
     // 読んでから書くと、そのあいだの書き込みを潰しうる。追記はその場で SQL に任せる
-    const entry = JSON.stringify({ chapter_key: chapterKey ?? "", text });
+    const entry = JSON.stringify({ text });
     await db.update(chats).set({
       summaries: sql`json_insert(${chats.summaries}, '$[#]', json(${entry}))`,
-      ...(mode === "rolling" && uptoId !== null ? { meta: sql`json_set(${chats.meta}, '$.summarized_upto_id', ${uptoId})` } : {}),
+      meta: sql`json_set(${chats.meta}, '$.summarized_upto_id', ${uptoId})`,
     }).where(eq(chats.id, chat.id));
   } catch (error) {
-    console.error("chapter summary failed", error);
+    console.error("summary failed", error);
   }
 }
 
-async function sourceMessages(db: Db, chat: typeof chats.$inferSelect, chapterKey: string | null, mode: SummaryMode) {
-  if (mode === "rolling") {
-    const all = await db.select().from(chatMessages)
-      .where(and(eq(chatMessages.chatId, chat.id), eq(chatMessages.status, MESSAGE_STATUSES.normal), gt(chatMessages.id, summarizedUptoId(chat))))
-      .orderBy(asc(chatMessages.id));
-    if (all.length <= ROLLING_KEEP_MESSAGES) return { messages: [], uptoId: null };
-    const folded = all.slice(0, all.length - ROLLING_KEEP_MESSAGES);
-    return { messages: folded.slice(-MAX_SOURCE_MESSAGES), uptoId: folded.at(-1)!.id };
-  }
-  const messages = await db.select().from(chatMessages)
-    .where(and(eq(chatMessages.chatId, chat.id), eq(chatMessages.status, MESSAGE_STATUSES.normal), eq(chatMessages.chapterKey, chapterKey ?? "")))
+async function sourceMessages(db: Db, chat: typeof chats.$inferSelect) {
+  const all = await db.select().from(chatMessages)
+    .where(and(eq(chatMessages.chatId, chat.id), eq(chatMessages.status, MESSAGE_STATUSES.normal), gt(chatMessages.id, summarizedUptoId(chat))))
     .orderBy(asc(chatMessages.id));
-  return { messages: messages.slice(-MAX_SOURCE_MESSAGES), uptoId: null };
+  if (all.length <= ROLLING_KEEP_MESSAGES) return { messages: [], uptoId: null };
+  const folded = all.slice(0, all.length - ROLLING_KEEP_MESSAGES);
+  return { messages: folded.slice(-MAX_SOURCE_MESSAGES), uptoId: folded.at(-1)!.id };
 }
 
 // JSON で返してくる上流がまだ残っていても拾えるようにしておく

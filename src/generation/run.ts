@@ -3,7 +3,7 @@
 // それを超えて止まったものは、streamed_at が更新されなくなるので stalled として失敗に倒される (stream.ts)
 import { and, eq, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
-import { aiUsages, CHAT_STATUSES, characters, chatMessages, chats, MESSAGE_STATUSES, plots } from "../db/schema";
+import { aiUsages, characters, chatMessages, chats, MESSAGE_STATUSES } from "../db/schema";
 import type { Bindings } from "../env";
 import type { Chat, ChatMessage, Plot } from "../views/context";
 import { loadCasts } from "../views/context";
@@ -23,11 +23,9 @@ import { variantsOf } from "./variants";
 const PUBLISH_INTERVAL_MS = 100;
 const PERSIST_INTERVAL_MS = 1000;
 const WALL_CLOCK_LIMIT_MS = 180_000;
-// 詰んで進めなくなる事故を防ぐためのシステム側の保険。作者には見せない
-const MAX_TURNS_PER_CHAPTER = 40;
 // プロンプトに載せる不採用の出力。増やすほど前の案に引きずられ、トークンも伸びる
 const MAX_REJECTED = 3;
-// 章の無いチャットで、ローリング要約を走らせる会話の長さ
+// ローリング要約を走らせる会話の長さ
 const ROLLING_TRIGGER_MESSAGES = 40;
 
 class Canceled extends Error {}
@@ -38,7 +36,7 @@ const STATUS_VALUES: Record<Status, number> = {
   normal: MESSAGE_STATUSES.normal, failed: MESSAGE_STATUSES.failed, canceled: MESSAGE_STATUSES.canceled,
 };
 
-// waitUntil: 章の要約のように、done を送ったあとに続ける処理を載せる
+// waitUntil: 要約のように、done を送ったあとに続ける処理を載せる
 export type RunDeps = { db: Db; env: Bindings; ownerName: string; waitUntil: (promise: Promise<unknown>) => void };
 
 // message はすでに pending から streaming に切り替えてある (このリクエストが生成を受け持つ)
@@ -211,8 +209,6 @@ class Generation {
     if (p && p.selfSpeakers.length > 0) meta.self_speakers = p.selfSpeakers;
     if (p && p.noiseLines > 0) meta.noise_lines = p.noiseLines;
     if (replayedLines > 0) meta.replayed_lines = replayedLines;
-    // 判定の根拠を残して chapter_cleared の精度を観測する
-    if (p) meta.chapter_cleared = p.isChapterCleared();
     // 選択肢は本文ではないので meta に置く。空なら書かず、UI は自由入力のままにする
     if (this.chat.choiceMode && p && p.choices.length > 0) meta.choices = p.choices;
     // 場面の状態。次のターンの few-shot に戻して、時間と場所のドリフトを抑える
@@ -261,36 +257,10 @@ class Generation {
       await db.update(characters).set({ messagesCount: sql`${characters.messagesCount} + 1` }).where(eq(characters.id, lead.character.id));
     }
 
+    // コンテキストが青天井に伸びないよう、古いぶんを要約に畳む
     [this.chat] = await db.select().from(chats).where(eq(chats.id, this.chat.id)).limit(1);
-    // 完結後の後日談。章もクリア数も二度と動かさない
-    if (this.chat.finishedAt !== null) return;
-
-    const chapterKeys = this.plot.chapters
-      .filter((c): c is Record<string, unknown> => typeof c === "object" && c !== null && !Array.isArray(c))
-      .map((c) => (c.key === null || c.key === undefined ? "" : String(c.key)));
-    if (chapterKeys.length === 0) {
-      // 章が無いとコンテキストが青天井に伸びるので、古いぶんを要約に畳む
-      if ((await promptMessages(db, this.chat)).length > ROLLING_TRIGGER_MESSAGES) {
-        this.deps.waitUntil(summarize(this.deps, this.chat.id, null, "rolling"));
-      }
-      return;
-    }
-
-    const closingKey = this.chat.currentChapterKey;
-    const forced = this.chat.turnsInChapter >= MAX_TURNS_PER_CHAPTER;
-    if (!this.presenter?.isChapterCleared() && !forced) return;
-
-    if (isPresent(closingKey) && closingKey === chapterKeys.at(-1)) {
-      // 最終章のクリア。結末の定義と収集は廃止したので、完了とクリア数だけを記録する
-      await db.batch([
-        db.update(chats).set({ status: CHAT_STATUSES.finished, finishedAt: new Date() }).where(eq(chats.id, this.chat.id)),
-        db.update(plots).set({ clearsCount: sql`${plots.clearsCount} + 1` }).where(eq(plots.id, this.plot.id)),
-      ]);
-    } else {
-      const index = chapterKeys.indexOf(closingKey);
-      await db.update(chats).set({ currentChapterKey: index < 0 ? "" : (chapterKeys[index + 1] ?? ""), turnsInChapter: 0 })
-        .where(eq(chats.id, this.chat.id));
-      this.deps.waitUntil(summarize(this.deps, this.chat.id, closingKey, "chapter"));
+    if ((await promptMessages(db, this.chat)).length > ROLLING_TRIGGER_MESSAGES) {
+      this.deps.waitUntil(summarize(this.deps, this.chat.id));
     }
   }
 }

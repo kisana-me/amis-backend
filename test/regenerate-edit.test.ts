@@ -17,7 +17,7 @@ const drain = async (aid: string) => {
   await settle();
 };
 
-async function setup(chapters: unknown[] = []) {
+async function setup() {
   await insertAiModel({ provider: "mock" });
   const yuki = await insertCharacter({ name: "ユキ" });
   const face = await insertImage();
@@ -26,7 +26,7 @@ async function setup(chapters: unknown[] = []) {
     { characterId: yuki.id, imageId: face.id, situation: "笑顔", position: 0 },
     { characterId: yuki.id, imageId: secretFace.id, situation: "涙", secret: true, position: 1 },
   ]);
-  const plot = await insertPlot({ chapters });
+  const plot = await insertPlot();
   const illustration = await insertImage();
   const secretIllustration = await insertImage();
   await db().insert(plotImages).values([
@@ -37,7 +37,7 @@ async function setup(chapters: unknown[] = []) {
   const chatAid = (await json(post("/chats/create", { plot_aid: plot.aid }))).chat.aid as string;
   const [chat] = await db().select().from(chats).where(eq(chats.aid, chatAid));
   const [message] = await db().insert(chatMessages).values({
-    aid: uid("ms"), chatId: chat.id, role: MESSAGE_ROLES.assistant, chapterKey: chat.currentChapterKey,
+    aid: uid("ms"), chatId: chat.id, role: MESSAGE_ROLES.assistant,
     content: [{ speaker: "yuki", text: "……きみが転校生？" }],
   }).returning();
   return { chat, chatAid, message, face, secretFace, illustration, secretIllustration };
@@ -148,15 +148,14 @@ describe("やり直しと選び直し", () => {
 });
 
 describe("チャットの設定と削除", () => {
-  it("渡したキーだけを変える。アーカイブを解くと完結済みなら finished に戻る", async () => {
+  it("渡したキーだけを変える。アーカイブを解くと normal に戻る", async () => {
     const { chatAid } = await setup();
     const res = await json(request("PATCH", `/chats/${chatAid}`, { title: " 新しい題 ", reply_style: "narration", choice_mode: "1" }));
     expect(res.chat).toMatchObject({ title: "新しい題", display_title: "新しい題", reply_style: "narration", choice_mode: true });
     expect((await request("PATCH", `/chats/${chatAid}`, { reply_style: "nope" })).status).toBe(422);
     expect((await request("PATCH", `/chats/${chatAid}`, { model_aid: "nosuchmodel000" })).status).toBe(422);
-    await db().update(chats).set({ finishedAt: new Date() }).where(eq(chats.aid, chatAid));
     expect((await json(request("PATCH", `/chats/${chatAid}`, { archived: true }))).chat.status).toBe("archived");
-    expect((await json(request("PATCH", `/chats/${chatAid}`, { archived: false }))).chat.status).toBe("finished");
+    expect((await json(request("PATCH", `/chats/${chatAid}`, { archived: false }))).chat.status).toBe("normal");
   });
 
   it("削除すると見えなくなり、生成中のメッセージは止まる", async () => {
@@ -169,15 +168,21 @@ describe("チャットの設定と削除", () => {
   });
 });
 
-describe("章の要約", () => {
-  it("章をクリアすると次の章へ進み、閉じた章の要約が追記される", async () => {
-    const { chatAid } = await setup([{ key: "c1", title: "出会い", objective: "名前を覚えられる" }, { key: "c2", title: "答え", objective: "関係が決まる" }]);
-    for (let turn = 0; turn < 2; turn++) {
-      await drain((await json(post(`/chats/${chatAid}/messages`, { content: `${turn}回目` }))).message_aid);
-    }
-    const [chat] = await db().select().from(chats).where(eq(chats.aid, chatAid));
-    expect(chat.currentChapterKey).toBe("c2");
-    expect(chat.turnsInChapter).toBe(0);
-    expect(chat.summaries).toEqual([{ chapter_key: "c1", text: expect.stringMatching(/^（擬似要約）/) }]);
+describe("ローリング要約", () => {
+  it("会話が伸びたら、末尾を残して古いぶんを要約に畳む", async () => {
+    const { chat, chatAid } = await setup();
+    // D1 は 1 文の変数の数に上限があるので、1 通ずつ batch に積む
+    const [first, ...rest] = Array.from({ length: 40 }, (_, i) => db().insert(chatMessages).values({
+      aid: uid("ms"), chatId: chat.id, role: i % 2 === 0 ? MESSAGE_ROLES.user : MESSAGE_ROLES.assistant,
+      content: [{ speaker: null, text: `${i}通目` }],
+    }));
+    await db().batch([first, ...rest]);
+    await drain((await json(post(`/chats/${chatAid}/messages`, { content: "続き" }))).message_aid);
+
+    const [row] = await db().select().from(chats).where(eq(chats.aid, chatAid));
+    expect(row.summaries).toEqual([{ text: expect.stringMatching(/^（擬似要約）/) }]);
+    // 導入・既存の 1 通・足した 40 通・今回の 2 通のうち、末尾の 24 通を残す
+    const ids = (await db().select({ id: chatMessages.id }).from(chatMessages).where(eq(chatMessages.chatId, chat.id))).map((m) => m.id).sort((a, b) => a - b);
+    expect(row.meta).toMatchObject({ summarized_upto_id: ids.at(-25) });
   });
 });

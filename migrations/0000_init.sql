@@ -124,7 +124,6 @@ CREATE TABLE `plots` (
 	`description` text DEFAULT '' NOT NULL,
 	`situation` text DEFAULT '' NOT NULL,
 	`situation_public` integer DEFAULT false NOT NULL,
-	`chapters` text DEFAULT '[]' NOT NULL,
 	`opening_scene` text DEFAULT '[]' NOT NULL,
 	`allow_fork` integer DEFAULT false NOT NULL,
 	`status` integer DEFAULT 0 NOT NULL,
@@ -135,13 +134,11 @@ CREATE TABLE `plots` (
 	`derived_rating` integer,
 	`rating` integer GENERATED ALWAYS AS (coalesce(mod_rating, max(user_rating, coalesce(auto_rating, 0), coalesce(derived_rating, 0)))) VIRTUAL,
 	`chats_count` integer DEFAULT 0 NOT NULL,
-	`clears_count` integer DEFAULT 0 NOT NULL,
 	`likes_count` integer DEFAULT 0 NOT NULL,
 	`meta` text DEFAULT '{}' NOT NULL,
 	`created_at` integer NOT NULL,
 	`updated_at` integer NOT NULL,
 	FOREIGN KEY (`icon_id`) REFERENCES `images`(`id`) ON UPDATE no action ON DELETE no action,
-	CONSTRAINT "chapters" CHECK(json_valid("chapters")),
 	CONSTRAINT "opening_scene" CHECK(json_valid("opening_scene")),
 	CONSTRAINT "meta" CHECK(json_valid("meta"))
 );
@@ -151,7 +148,7 @@ CREATE INDEX `index_plots_on_author_id` ON `plots` (`author_id`);--> statement-b
 CREATE INDEX `index_plots_on_icon_id` ON `plots` (`icon_id`);--> statement-breakpoint
 CREATE INDEX `index_plots_on_forked_from_id` ON `plots` (`forked_from_id`);--> statement-breakpoint
 CREATE INDEX `index_plots_on_rating` ON `plots` (`rating`);--> statement-breakpoint
-CREATE INDEX `index_plots_on_status_and_visibility_and_clears_count` ON `plots` (`status`,`visibility`,`clears_count`);--> statement-breakpoint
+CREATE INDEX `index_plots_on_status_and_visibility_and_likes_count` ON `plots` (`status`,`visibility`,`likes_count`);--> statement-breakpoint
 CREATE TABLE `lores` (
 	`id` integer PRIMARY KEY NOT NULL,
 	`aid` text(14) NOT NULL,
@@ -217,9 +214,6 @@ CREATE TABLE `chats` (
 	`status` integer DEFAULT 0 NOT NULL,
 	`reply_style` integer DEFAULT 0 NOT NULL,
 	`choice_mode` integer DEFAULT false NOT NULL,
-	`current_chapter_key` text DEFAULT '' NOT NULL,
-	`turns_in_chapter` integer DEFAULT 0 NOT NULL,
-	`finished_at` integer,
 	`summaries` text DEFAULT '[]' NOT NULL,
 	`messages_count` integer DEFAULT 0 NOT NULL,
 	`last_message_at` integer,
@@ -245,7 +239,6 @@ CREATE TABLE `chat_messages` (
 	`role` integer NOT NULL,
 	`status` integer DEFAULT 0 NOT NULL,
 	`content` text DEFAULT '[]' NOT NULL,
-	`chapter_key` text DEFAULT '' NOT NULL,
 	`speaker_character_id` integer,
 	`replaced_by_id` integer,
 	`ai_model_id` integer,

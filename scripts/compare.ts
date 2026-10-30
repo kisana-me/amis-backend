@@ -4,7 +4,8 @@
 //   COMPARE_TOKEN=<セッショントークン> node scripts/compare.ts [パス[:JSON本文]] ...
 //   パスを省くと、決まった一式 (status、キャラの一覧と全件の詳細など) を比べる
 //
-// 意図して変えたところ (廃止した項目、画像の置き場所、分けたり統合したりしたエンドポイント) は、比べる前にそろえる
+// 意図して変えたところ (廃止した項目、画像の置き場所、分けたり統合したりしたエンドポイント) は、比べる前にそろえる。
+// プロットの人気順 (/home、/plots、キャラの出演プロット) は完結数からいいね数に変えたので、並びは食い違ってよい
 export {};
 
 const RAILS = process.env.RAILS_URL ?? "http://localhost:3001";
@@ -46,7 +47,20 @@ async function post(base: string, path: string, body: Json, headers: Record<stri
 
 // --- 意図した違いをそろえる ---------------------------------------------------
 
+// 章・結末・実績は廃止したので、どこに出てきても外す
+const REMOVED_KEYS = new Set([
+  "chapters", "chapter", "chapter_key", "current_chapter_key", "turns_in_chapter", "chapters_count", "free_form",
+  "clears_count", "finished", "finished_at", "endings", "collected_count", "ending_key", "ending_title", "achievements",
+]);
+
+function dropRemoved(json: Json): Json {
+  if (Array.isArray(json)) return json.map(dropRemoved);
+  if (!isObject(json)) return json;
+  return Object.fromEntries(Object.entries(json).filter(([k]) => !REMOVED_KEYS.has(k)).map(([k, v]) => [k, dropRemoved(v)]));
+}
+
 function normalizeRails(path: string, json: Json): Json {
+  json = dropRemoved(json);
   if (path === "/status" && isObject(json) && "quota" in json) {
     const { queue_position: _q, ...rest } = json;
     const quota = json.quota as Record<string, unknown> | undefined;
@@ -57,22 +71,13 @@ function normalizeRails(path: string, json: Json): Json {
       models: (json.models as Record<string, unknown>[] | undefined)?.map(({ coin_cost: _c, ...m }) => m),
     };
   }
-  // 結末 (エンディング) は廃止
-  if (/^\/plots\/[^/]+$/.test(path) && isObject(json) && isObject(json.plot)) {
-    const { endings: _e, collected_count: _c, ...plot } = json.plot;
-    return { ...json, plot };
-  }
-  if (/^\/plots\/[^/]+\/edit$/.test(path) && isObject(json) && isObject(json.plot)) {
-    const chapters = (json.plot.chapters as Record<string, unknown>[]).map(({ endings: _e, ...chapter }) => chapter);
-    return { ...json, plot: { ...json.plot, chapters } };
-  }
   // Worker のチャットはメッセージを新しい側の 30 件だけ返す (前は /chats/:aid/history で遡る)
   if (/^\/chats\/[^/]+$/.test(path) && isObject(json) && Array.isArray(json.messages)) {
     json = { ...json, messages: json.messages.slice(-30) };
   }
-  // チャットの結末とコイン・無料枠も廃止
+  // 完結は廃止したので普通のチャットに戻る。コイン・無料枠も廃止
   if (path.startsWith("/chats") && isObject(json)) {
-    const chat = ({ ending_key: _k, ending_title: _t, ...rest }: Record<string, unknown>) => rest;
+    const chat = (x: Record<string, unknown>) => (x.status === "finished" ? { ...x, status: "normal" } : x);
     const quota = json.quota as Record<string, unknown> | undefined;
     return {
       ...json,
@@ -80,9 +85,6 @@ function normalizeRails(path: string, json: Json): Json {
       ...(Array.isArray(json.chats) ? { chats: json.chats.map((x) => chat(x as Record<string, unknown>)) } : {}),
       ...(quota ? { quota: { weekly_usage_percent: quota.weekly_usage_percent } } : {}),
     };
-  }
-  if (path.startsWith("/accounts/") && isObject(json) && "achievements" in json) {
-    return { ...json, achievements: [] };
   }
   return json;
 }

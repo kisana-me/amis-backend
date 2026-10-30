@@ -1,5 +1,5 @@
-// プロット + 出演 + 章 + 導入 + 推奨ペルソナ + 設定集 + 画像を 1 回の保存で同期する (本体の Amis::PlotWriter と
-// Plot / PlotCharacter / Persona のバリデーション、ChaptersValidator、OpeningSceneValidator)。
+// プロット + 出演 + 導入 + 推奨ペルソナ + 設定集 + 画像を 1 回の保存で同期する (本体の Amis::PlotWriter と
+// Plot / PlotCharacter / Persona のバリデーション、OpeningSceneValidator)。
 // キャラと同じく、検証 → 画像を R2 に置く → 行の書き込みを 1 回の batch に、の順にする
 import { and, eq, inArray, ne, notInArray, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
@@ -24,11 +24,9 @@ const MAX_CAST = 10;
 const MAX_PERSONAS = 5;
 // 1 ターンに載りうる分量が青天井にならないよう、冊数だけは締める
 const MAX_LORES = 5;
-const MAX_CHAPTERS = 20;
 const MAX_OPENING_LINES = 30;
 // 1 行の長さは出力規約の地の文に合わせる。導入だけ極端に長いと本文の見本にならない
 const MAX_OPENING_TEXT = 300;
-const KEY_REGEX = /^[a-z0-9_]{1,32}$/;
 
 type Batch = BatchItem<"sqlite">[];
 const ref = <T,>(value: unknown) => value as T;
@@ -49,10 +47,6 @@ export async function savePlot(c: Context<AppEnv>, current: Plot | null): Promis
   if (form.has("allow_fork")) values.allowFork = bool(form.get("allow_fork"));
   if (form.has("visibility")) values.visibility = enumValue(errors, "公開状態", VISIBILITY_KEYS, form.get("visibility"));
   if (form.has("user_rating")) values.userRating = enumValue(errors, "レーティング", USER_RATING_KEYS, form.get("user_rating"));
-  if (form.has("chapters_json")) {
-    const chapters = parseChapters(errors, form.get("chapters_json"));
-    if (chapters) values.chapters = chapters;
-  }
 
   requiredText(errors, "タイトル", values.title ?? current?.title ?? "", 100);
   optionalText(errors, "一言紹介", values.tagline ?? current?.tagline ?? "", 100);
@@ -288,33 +282,6 @@ function speakerKeyFor(name: string, used: Set<string>): string {
   for (let suffix = 2; used.has(candidate); suffix++) candidate = `${base}${suffix}`;
   used.add(candidate);
   return candidate;
-}
-
-// 章の定義 (本体の ChaptersValidator / ChapterDefinition)。結末 (endings) は廃止したので黙って取り除く
-function parseChapters(errors: ValidationErrors, raw: string | null): Record<string, unknown>[] | null {
-  let value: unknown;
-  try {
-    value = raw === null || rubyStrip(raw) === "" ? [] : JSON.parse(raw);
-  } catch (error) {
-    errors.add(`章が JSON として不正です (${error instanceof Error ? error.message : String(error)})`);
-    return null;
-  }
-  if (!Array.isArray(value)) return void errors.add("章は配列である必要があります"), null;
-  if (value.length > MAX_CHAPTERS) return void errors.add(`章は${MAX_CHAPTERS}章までです`), null;
-  if (!value.every((c) => typeof c === "object" && c !== null && !Array.isArray(c))) {
-    return void errors.add("章の各要素はオブジェクトである必要があります"), null;
-  }
-  const chapters = (value as Record<string, unknown>[]).map(({ endings: _endings, ...chapter }) => chapter);
-  const keys = chapters.map((c) => c.key);
-  if (new Set(keys).size !== keys.length) errors.add("章のキーが重複しています");
-  chapters.forEach((chapter, i) => {
-    const key = chapter.key === null || chapter.key === undefined ? "" : String(chapter.key);
-    if (isBlank(key)) errors.add(`章[${i}] キーを入力してください`);
-    else if (!KEY_REGEX.test(key)) errors.add(`章[${i}] キーは正しい形式で入力してください`);
-    if (charLength(String(chapter.title ?? "")) > 50) errors.add(`章[${i}] タイトルは50文字以内で入力してください`);
-    if (charLength(String(chapter.objective ?? "")) > 500) errors.add(`章[${i}] ねらいは500文字以内で入力してください`);
-  });
-  return chapters;
 }
 
 // 本体の OpeningSceneValidator

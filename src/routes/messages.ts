@@ -56,11 +56,10 @@ messageRoutes.post("/chats/:aid/messages", requireSignin, async (c) => {
     const assistant = newAid();
     const insertAssistant = db.insert(chatMessages).values({
       chatId: chat.id, aid: assistant, role: MESSAGE_ROLES.assistant, status: MESSAGE_STATUSES.pending,
-      chapterKey: chat.currentChapterKey, content: [], aiModelId: model.id, meta: auto ? { auto: true } : {},
+      content: [], aiModelId: model.id, meta: auto ? { auto: true } : {},
     });
     const updateChat = db.update(chats).set({
       lastMessageAt: new Date(),
-      turnsInChapter: sql`${chats.turnsInChapter} + 1`,
       aiModelId: model.id,
       messagesCount: sql`${chats.messagesCount} + ${auto ? 1 : 2}`,
     }).where(eq(chats.id, chat.id));
@@ -70,7 +69,7 @@ messageRoutes.post("/chats/:aid/messages", requireSignin, async (c) => {
       await db.batch([
         db.insert(chatMessages).values({
           chatId: chat.id, aid: newAid(), role: MESSAGE_ROLES.user, status: MESSAGE_STATUSES.normal,
-          chapterKey: chat.currentChapterKey, content: [{ speaker: null, text: content }], autoRating: rateText(content),
+          content: [{ speaker: null, text: content }], autoRating: rateText(content),
         }),
         insertAssistant,
         updateChat,
@@ -270,7 +269,7 @@ messageRoutes.post("/messages/:aid/regenerate", requireSignin, async (c) => {
     await db.batch([
       db.insert(chatMessages).values({
         chatId: chat.id, aid, role: MESSAGE_ROLES.assistant, status: MESSAGE_STATUSES.pending,
-        chapterKey: message.chapterKey, content: [], aiModelId: model.id,
+        content: [], aiModelId: model.id,
         meta: {
           regenerate_of: message.aid,
           ...(isBlank(instruction) ? {} : { instruction }),
@@ -278,7 +277,7 @@ messageRoutes.post("/messages/:aid/regenerate", requireSignin, async (c) => {
           auto: message.meta.auto === true,
         },
       }),
-      // ターンは増えないので turns_in_chapter は据え置き。やり直しも 1 通として数える
+      // やり直しも 1 通として数える
       db.update(chats).set({ lastMessageAt: new Date(), messagesCount: sql`${chats.messagesCount} + 1` }).where(eq(chats.id, chat.id)),
     ]);
     return c.json({

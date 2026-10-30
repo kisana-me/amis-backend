@@ -2,7 +2,7 @@
 // プロンプトはプレフィックスキャッシュが効くよう、変化しにくい区画から順に並べる。
 // 現在時刻の埋め込みや出演キャラの並び順のブレは、プレフィックスを全損させる。
 // ここは DB を引かない。必要なものは prompt-input.ts がまとめて読み込んで渡す。
-// 文面は prompts/*.txt にある (本体から抜き出し、廃止した結末 (@@ending) の部分だけを外した)
+// 文面は prompts/*.txt にある (本体から抜き出し、廃止した章・結末 (@@cleared / @@ending) の部分を外した)
 import { REPLY_STYLES } from "../db/schema";
 import type { ChatMessage } from "../views/context";
 import { choices, scene, type SceneLine } from "../views/chat";
@@ -49,14 +49,11 @@ export type PromptCast = {
 export type PromptInput = {
   chat: {
     aid: string;
-    currentChapterKey: string;
-    turnsInChapter: number;
     choiceMode: boolean;
     replyStyle: number;
-    finished: boolean;
     summaries: unknown[];
   };
-  plot: { situation: string; chapters: unknown[] };
+  plot: { situation: string };
   // position, id 順
   casts: PromptCast[];
   plotImages: LabeledImage[];
@@ -64,7 +61,7 @@ export type PromptInput = {
   persona: { name: string; description: string } | null;
   // ペルソナが無いときのユーザーの役の名前 (アカウントの名前)
   ownerName: string;
-  // プロンプトに載せる会話 (いまの章の、要約に畳んでいない normal のメッセージ)
+  // プロンプトに載せる会話 (要約に畳んでいない normal のメッセージ)
   messages: ChatMessage[];
   // やり直しで不採用になった返答。新しい順
   rejected?: ChatMessage[];
@@ -73,18 +70,11 @@ export type PromptInput = {
   loreBlock?: string | null;
 };
 
-// key が無い章は、どの current_chapter_key とも一致しない (本体の ChapterDefinition と同じ)
-type Chapter = { key: string | null; title: string; objective: string };
-
 export class PromptBuilder {
   private readonly rejected: ChatMessage[];
-  private readonly chapters: Chapter[];
 
   constructor(private readonly input: PromptInput) {
     this.rejected = input.rejected ?? [];
-    this.chapters = input.plot.chapters
-      .filter((c): c is Record<string, unknown> => typeof c === "object" && c !== null && !Array.isArray(c))
-      .map((c) => ({ key: c.key === null || c.key === undefined ? null : String(c.key), title: str(c.title), objective: str(c.objective) }));
   }
 
   build(): ChatMessageParam[] {
@@ -102,7 +92,6 @@ export class PromptBuilder {
       section("状況設定", rubyStrip(this.input.plot.situation)),
       section("画像", this.imagesSection()),
       section("ユーザーの役", this.personaSection()),
-      section("現在の章", this.chapterSection()),
       section("これまでのあらすじ", this.summariesSection()),
       section("出力の締めくくり", closingRules),
     ].filter((s): s is string => s !== null).join("\n\n");
@@ -153,14 +142,12 @@ export class PromptBuilder {
   }
 
   hints(): Hints {
-    const chapter = this.currentChapter();
     return {
       // 同じチャットのリクエストをプレフィックスキャッシュに寄せるためのヒント
       cacheKey: this.input.chat.aid,
       speakerKeys: this.speakerKeys,
       speakerNames: this.speakerNames,
-      objective: chapter?.objective ?? "",
-      turnsInChapter: this.input.chat.turnsInChapter,
+      turn: this.input.messages.filter((m) => m.role !== 0).length,
       choiceMode: this.input.chat.choiceMode,
       autoContinue: this.input.autoContinue ?? false,
       regenerate: this.rejected.length,
@@ -204,42 +191,11 @@ export class PromptBuilder {
     return [rubyStrip(userInputRule), ...lines].join("\n\n");
   }
 
-  private currentChapter(): Chapter | undefined {
-    return this.chapters.find((c) => c.key === this.input.chat.currentChapterKey);
-  }
-
-  // 結末 (@@ending) は廃止したので、最終章でもクリアの判定だけを書かせる
-  private chapterSection(): string {
-    if (this.input.chat.finished) {
-      return [
-        "物語は完結しています。ここから先はその後日談です。",
-        "確定した結末を覆さず、余韻を保ったまま場面を積み重ねてください。",
-        "@@cleared は常に false にしてください。",
-      ].join("\n");
-    }
-    if (this.chapters.length === 0) {
-      return "この物語に章はありません。終わりを設けず、場面を積み重ねてください。\n@@cleared は常に false にしてください。";
-    }
-    const chapter = this.currentChapter();
-    if (!chapter) return "";
-
-    const lines = [`タイトル: ${chapter.title}`, `ねらい: ${chapter.objective}`];
-    // 障害が書かれていないと、モデルは最短距離でねらいを満たしにいくか、何も起こさずに漂う
-    lines.push("このねらいは、まだ達成されていません。ユーザーが正面から達成しようとしたら、一度は届かせないでください。"
-      + "達成を邪魔しているものが何なのかを、まず場面の中で具体的に見せてください。");
-    const final = isPresent(chapter.key) && chapter.key === (this.chapters.at(-1)?.key ?? null);
-    lines.push(final ? "これは最終章です。ねらいが達成されたら @@cleared を true にしてください。" : "ねらいが達成されたら @@cleared を true にしてください。");
-    return lines.join("\n");
-  }
-
   private summariesSection(): string {
     return this.input.chat.summaries.flatMap((entry) => {
       if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return [];
-      const { text: rawText, chapter_key: chapterKey } = entry as Record<string, unknown>;
-      const text = rubyStrip(str(rawText));
-      if (isBlank(text)) return [];
-      const chapter = this.chapters.find((c) => c.key === str(chapterKey));
-      return [chapter ? `## ${chapter.title}\n${text}` : text];
+      const text = rubyStrip(str((entry as Record<string, unknown>).text));
+      return isBlank(text) ? [] : [text];
     }).join("\n\n");
   }
 

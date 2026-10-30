@@ -14,7 +14,6 @@ export const chatMessages = sqliteTable("chat_messages", {
   status: integer("status").notNull().default(MESSAGE_STATUSES.normal),
   // シーンの行の配列 (本体と同じ JSON)
   content: text("content", { mode: "json" }).$type<unknown[]>().notNull().default([]),
-  chapterKey: text("chapter_key").notNull().default(""),
   speakerCharacterId: integer("speaker_character_id").references(() => characters.id),
   replacedById: integer("replaced_by_id"),
   aiModelId: integer("ai_model_id").references(() => aiModels.id, { onDelete: "set null" }),

@@ -21,7 +21,7 @@ import {
   chatJson, currentSceneStatus, excerpt, HIDDEN_MESSAGE_STATUSES, imageAids, isVisibleAssistant, messageJson,
 } from "../views/chat";
 import { type Chat, type ChatMessage, loadCasts, loadContext, loadersOf, type Plot, type ViewContext } from "../views/context";
-import { chapterDefinitions, imageDisplayUrl, leadCast, openingImageAids, openingLines } from "../views/json";
+import { imageDisplayUrl, leadCast, openingImageAids, openingLines } from "../views/json";
 import { paletteFor, type SceneImageRow, sceneImageCandidates } from "../views/palette";
 
 const LIMIT = 30;
@@ -127,11 +127,10 @@ chatRoutes.post("/chats/create", requireSignin, async (c) => {
   }
   const persona = await findPersona(db, plot.id, account.id, body.persona_aid);
   const opening = openingLines(plot);
-  const firstChapter = chapterDefinitions(plot)[0]?.key ?? "";
 
   const [chat] = await db.insert(chats).values({
     aid: newAid(), accountId: account.id, plotId: plot.id, personaId: persona?.id ?? null, aiModelId: model.id,
-    currentChapterKey: firstChapter, messagesCount: opening.length > 0 ? 1 : 0,
+    messagesCount: opening.length > 0 ? 1 : 0,
     lastMessageAt: opening.length > 0 ? new Date() : null,
   }).returning();
 
@@ -142,7 +141,7 @@ chatRoutes.post("/chats/create", requireSignin, async (c) => {
     ...(lead ? [db.update(characters).set({ chatsCount: sql`${characters.chatsCount} + 1` }).where(eq(characters.id, lead.character.id))] : []),
     ...(opening.length > 0 ? [db.insert(chatMessages).values({
       aid: newAid(), chatId: chat.id, role: MESSAGE_ROLES.assistant, status: MESSAGE_STATUSES.normal,
-      chapterKey: firstChapter, content: opening,
+      content: opening,
     })] : []),
   ]);
   return c.json(await chatShowJson(c, chat));
@@ -249,12 +248,8 @@ chatRoutes.patch("/chats/:aid", requireSignin, async (c) => {
     values.title = title;
   }
   if ("choice_mode" in body) values.choiceMode = castBoolean(body.choice_mode) === true;
-  // アーカイブは status で表す。解除したときに完結済みへ戻せるよう finished_at を見る
-  if ("archived" in body) {
-    values.status = castBoolean(body.archived) === true
-      ? CHAT_STATUSES.archived
-      : chat.finishedAt !== null ? CHAT_STATUSES.finished : CHAT_STATUSES.normal;
-  }
+  // アーカイブは status で表す
+  if ("archived" in body) values.status = castBoolean(body.archived) === true ? CHAT_STATUSES.archived : CHAT_STATUSES.normal;
   if ("reply_style" in body) {
     const style = REPLY_STYLE_KEYS[String(body.reply_style ?? "")];
     if (style === undefined) return error("応答スタイルが不正です");

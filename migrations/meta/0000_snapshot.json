@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "09423c55-b02d-469c-bff5-99611e046818",
+  "id": "74915120-d600-4eab-8142-692e80e14717",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "images": {
@@ -908,14 +908,6 @@
           "autoincrement": false,
           "default": false
         },
-        "chapters": {
-          "name": "chapters",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'[]'"
-        },
         "opening_scene": {
           "name": "opening_scene",
           "type": "text",
@@ -996,14 +988,6 @@
           "autoincrement": false,
           "default": 0
         },
-        "clears_count": {
-          "name": "clears_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
         "likes_count": {
           "name": "likes_count",
           "type": "integer",
@@ -1071,12 +1055,12 @@
           ],
           "isUnique": false
         },
-        "index_plots_on_status_and_visibility_and_clears_count": {
-          "name": "index_plots_on_status_and_visibility_and_clears_count",
+        "index_plots_on_status_and_visibility_and_likes_count": {
+          "name": "index_plots_on_status_and_visibility_and_likes_count",
           "columns": [
             "status",
             "visibility",
-            "clears_count"
+            "likes_count"
           ],
           "isUnique": false
         }
@@ -1099,10 +1083,6 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {
-        "chapters": {
-          "name": "chapters",
-          "value": "json_valid(\"chapters\")"
-        },
         "opening_scene": {
           "name": "opening_scene",
           "value": "json_valid(\"opening_scene\")"
@@ -1567,29 +1547,6 @@
           "autoincrement": false,
           "default": false
         },
-        "current_chapter_key": {
-          "name": "current_chapter_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "''"
-        },
-        "turns_in_chapter": {
-          "name": "turns_in_chapter",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "finished_at": {
-          "name": "finished_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "summaries": {
           "name": "summaries",
           "type": "text",
@@ -1774,14 +1731,6 @@
           "notNull": true,
           "autoincrement": false,
           "default": "'[]'"
-        },
-        "chapter_key": {
-          "name": "chapter_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "''"
         },
         "speaker_character_id": {
           "name": "speaker_character_id",

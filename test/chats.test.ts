@@ -7,7 +7,7 @@ import { accountRow, appWith, cast, db, insertCharacter, insertImage, insertPlot
 const app = () => appWith([accountRow(1), accountRow(2)], [{ token: "me", accountId: 1 }, { token: "other", accountId: 2 }]);
 
 async function insertChat(values: Partial<typeof chats.$inferInsert> = {}) {
-  const plot = values.plotId ? null : await insertPlot({ chapters: [{ key: "c1", title: "一" }, { key: "c2", title: "二" }] });
+  const plot = values.plotId ? null : await insertPlot();
   const [chat] = await db().insert(chats).values({ aid: uid("ct"), accountId: 1, plotId: plot?.id ?? values.plotId!, ...values }).returning();
   return chat;
 }
@@ -29,7 +29,7 @@ describe("excerpt", () => {
 describe("POST /chats", () => {
   it("自分のチャットだけを新しい順に。アーカイブは別タブ。最後の 1 通の抜粋を付ける", async () => {
     const older = await insertChat({ lastMessageAt: new Date(1000) });
-    const newer = await insertChat({ lastMessageAt: new Date(2000), currentChapterKey: "c2" });
+    const newer = await insertChat({ lastMessageAt: new Date(2000) });
     await insertChat({ status: 2 });
     await insertChat({ status: 3 });
     await insertChat({ accountId: 2 });
@@ -41,9 +41,12 @@ describe("POST /chats", () => {
     expect(body.chats.map((c: any) => c.aid)).toEqual([newer.aid, older.aid]);
     expect(body.chats[0]).toMatchObject({
       last_message: "新しい", status: "normal", reply_style: "balanced", model_aid: null, persona: null,
-      chapter: { key: "c2", title: "二", index: 1, total: 2, final: true },
     });
-    expect(body.chats[0]).not.toHaveProperty("ending_key");
+    // 章と結末は廃止した
+    for (const key of ["chapter", "current_chapter_key", "turns_in_chapter", "finished", "finished_at", "ending_key"]) {
+      expect(body.chats[0]).not.toHaveProperty(key);
+    }
+    expect(body.chats[0].plot).not.toHaveProperty("chapters");
     expect(body.chats[1].last_message).toBeNull();
     expect((await app().json("/chats", { token: "me", body: { tab: "archived" } })).chats).toHaveLength(1);
   });

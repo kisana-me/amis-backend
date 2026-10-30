@@ -123,15 +123,15 @@ describe("provider と api の組み合わせ", () => {
 
 // ここから下は移植で足したもの
 describe("streamCompletion", () => {
-  it("mock は台本を少しずつ流し、場面の状態とクリアの判定まで書く", async () => {
+  it("mock は台本を少しずつ流し、場面の状態まで書く", async () => {
     let text = "";
-    const result = await streamCompletion(model({ provider: "mock" }), MESSAGES, { speakerNames: ["雪"], turnsInChapter: 2, objective: "仲直り" }, {}, (d) => {
+    const result = await streamCompletion(model({ provider: "mock" }), MESSAGES, { speakerNames: ["雪"], turn: 2 }, {}, (d) => {
       text += d;
     });
     expect(text).toMatch(/^@: /);
     expect(text).toContain("@雪: *相手の言葉を反芻するように*\n「こんにちは……ね」");
-    expect(text).toContain("@@cleared: true");
-    expect(text).not.toContain("@@ending");
+    expect(text).toContain("@@air: ");
+    expect(text).not.toContain("@@cleared");
     expect(result.finishReason).toBe("stop");
   });
 

@@ -67,28 +67,6 @@ type Hash = Record<string, unknown>;
 const isHash = (v: unknown): v is Hash => typeof v === "object" && v !== null && !Array.isArray(v);
 const present = (v: unknown) => v !== null && v !== undefined && String(v).trim() !== "";
 
-// 章の定義。Hash のものだけを使う (本体の Plot#chapter_definitions)
-export function chapterDefinitions(plot: Plot): { key: string | null; title: string | null }[] {
-  return plot.chapters.filter(isHash).map((c) => ({
-    key: c.key === undefined || c.key === null ? null : String(c.key),
-    // ActiveModel の既定値と同じく、項目がなければ ""、null が入っていれば null
-    title: c.title === undefined ? "" : c.title === null ? null : String(c.title),
-  }));
-}
-
-// 編集用の章の定義。ねらい (objective) まで返す。結末 (endings) は廃止した
-export function chapterEditDefinitions(plot: Plot) {
-  const definitions = chapterDefinitions(plot);
-  return plot.chapters.filter(isHash).map((c, i) => ({
-    ...definitions[i],
-    objective: c.objective === undefined ? "" : c.objective === null ? null : String(c.objective),
-  }));
-}
-
-export function chapterCount(plot: Plot): number {
-  return plot.chapters.filter(isHash).length;
-}
-
 // 導入の行。本文が空の行は落とす。icon が吹き出しの顔、image が地の文に添える挿絵 (本体の Plot#opening_lines)
 export function openingLines(plot: Plot) {
   return plot.openingScene.filter(isHash).filter((line) => present(line.text)).map((line) => ({
@@ -112,7 +90,6 @@ export function leadCast(plot: Plot, ctx: ViewContext): Cast | undefined {
 
 // _plot.json.jbuilder
 export function plotJson(plot: Plot, ctx: ViewContext) {
-  const chapters = chapterCount(plot);
   const lead = leadCast(plot, ctx);
   return {
     aid: plot.aid,
@@ -120,15 +97,12 @@ export function plotJson(plot: Plot, ctx: ViewContext) {
     tagline: plot.tagline,
     description: plot.description,
     icon_url: iconDisplayUrl(plot.iconId, ctx, "amiverse-1.webp"),
-    free_form: chapters === 0,
     rating: ratingLabel(plot.rating),
     official: plot.authorId === null,
     author: plot.authorId === null ? null : authorJson(ctx.authors.get(plot.authorId)),
     allow_fork: plot.allowFork,
     chats_count: plot.chatsCount,
     likes_count: plot.likesCount,
-    clears_count: plot.clearsCount,
-    chapters_count: chapters,
     cast: (ctx.casts.get(plot.id) ?? []).map((c) => castJson(c, ctx)),
     lead_character: lead ? characterJson(lead.character, ctx) : null,
   };
@@ -238,6 +212,5 @@ export function linkCardJson(card: { kind: "plot"; row: Plot } | { kind: "charac
     official: row.authorId === null,
     author_name: row.authorId === null ? null : (ctx.authors.get(row.authorId)?.name ?? null),
     chats_count: row.chatsCount,
-    ...(card.kind === "plot" ? { free_form: chapterCount(card.row) === 0, chapters_count: chapterCount(card.row) } : {}),
   };
 }

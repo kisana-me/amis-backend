@@ -121,8 +121,8 @@ characterRoutes.post("/characters/:aid{[a-z0-9]{14}}", async (c) => {
         .where(and(eq(plotCharacters.characterId, character.id), eq(plotCharacters.isLead, isLead)))),
     );
   const [leadPlots, castPlots, publicImages, [casts], [like]] = await Promise.all([
-    db.select().from(plots).where(plotsWhere(true)).orderBy(desc(plots.clearsCount), desc(plots.id)).limit(LIMIT),
-    db.select().from(plots).where(plotsWhere(false)).orderBy(desc(plots.clearsCount), desc(plots.id)).limit(LIMIT),
+    db.select().from(plots).where(plotsWhere(true)).orderBy(desc(plots.likesCount), desc(plots.id)).limit(LIMIT),
+    db.select().from(plots).where(plotsWhere(false)).orderBy(desc(plots.likesCount), desc(plots.id)).limit(LIMIT),
     // シークレット指定の絵は公開のカルーセルには出さない
     db.select({ imageId: characterImages.imageId }).from(characterImages)
       .where(and(eq(characterImages.characterId, character.id), eq(characterImages.secret, false)))

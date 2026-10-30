@@ -8,9 +8,9 @@ const app = () => appWith([me, other], [{ token: "me", accountId: 1 }, { token: 
 
 describe("POST /plots の並び順", () => {
   it("sort で並び順が変わる", async () => {
-    await insertPlot({ title: "古い人気", clearsCount: 9, chatsCount: 1 });
-    await insertPlot({ title: "話題", clearsCount: 0, chatsCount: 50 });
-    await insertPlot({ title: "新着", clearsCount: 1, chatsCount: 0 });
+    await insertPlot({ title: "古い人気", likesCount: 9, chatsCount: 1 });
+    await insertPlot({ title: "話題", likesCount: 0, chatsCount: 50 });
+    await insertPlot({ title: "新着", likesCount: 1, chatsCount: 0 });
     const titles = async (sort?: string) => (await app().json("/plots", { body: sort ? { sort } : {} })).plots.map((p: any) => p.title);
     expect(await titles()).toEqual(["古い人気", "新着", "話題"]);
     expect(await titles("new")).toEqual(["新着", "話題", "古い人気"]);
@@ -20,7 +20,7 @@ describe("POST /plots の並び順", () => {
 });
 
 describe("POST /accounts/@:name_id", () => {
-  it("本人には非公開のものも visibility 付きで返し、他人には一覧と同じ見え方。結末の収集は空", async () => {
+  it("本人には非公開のものも visibility 付きで返し、他人には一覧と同じ見え方。結末の収集 (achievements) は返さない", async () => {
     await insertPlot({ title: "公開", authorId: 1 });
     await insertPlot({ title: "非公開", authorId: 1, visibility: 2 });
     await insertPlot({ title: "削除済み", authorId: 1, status: 2 });
@@ -28,7 +28,7 @@ describe("POST /accounts/@:name_id", () => {
     const mine = await app().json("/accounts/@user1", { token: "me" });
     expect(mine.mine).toBe(true);
     expect(mine.plots.map((p: any) => [p.title, p.visibility])).toEqual([["非公開", "closed"], ["公開", "opened"]]);
-    expect(mine.achievements).toEqual([]);
+    expect(mine).not.toHaveProperty("achievements");
 
     const theirs = await app().json("/accounts/@user1", { token: "other" });
     expect(theirs.mine).toBe(false);
@@ -47,12 +47,14 @@ describe("POST /accounts/@:name_id", () => {
 describe("POST /cards", () => {
   it("全年齢以外の絵は伏せる。見せられないものは 404", async () => {
     const icon = await insertImage();
-    const general = await insertPlot({ iconId: icon.id, chapters: [{ key: "c" }] });
+    const general = await insertPlot({ iconId: icon.id });
     const nsfw = await insertCharacter({ iconId: icon.id, userRating: 1 });
     const closed = await insertPlot({ visibility: 2 });
 
     const plotCard = (await app().json("/cards", { body: { type: "plot", aid: general.aid } })).card;
-    expect(plotCard).toMatchObject({ type: "plot", icon_url: expect.stringContaining(icon.aid), author_name: "なまえ1", free_form: false, chapters_count: 1 });
+    expect(plotCard).toMatchObject({ type: "plot", icon_url: expect.stringContaining(icon.aid), author_name: "なまえ1" });
+    expect(plotCard).not.toHaveProperty("free_form");
+    expect(plotCard).not.toHaveProperty("chapters_count");
     const characterCard = (await app().json("/cards", { body: { type: "character", aid: nsfw.aid } })).card;
     expect(characterCard.icon_url).toBe("https://api.example.test/static_assets/images/amiverse-1.webp");
     expect(characterCard).not.toHaveProperty("free_form");
@@ -178,11 +180,10 @@ describe("キャラのピッカーと編集", () => {
 });
 
 describe("POST /plots/:aid/edit", () => {
-  it("章のねらい、出演者、付いている設定集の中身を返し、結末は返さない", async () => {
+  it("出演者、付いている設定集の中身を返し、章と結末は返さない", async () => {
     const character = await insertCharacter({ authorId: 2 });
     const plot = await insertPlot({
       authorId: 1,
-      chapters: [{ key: "c1", title: "一", objective: "ねらい", endings: [{ key: "e" }] }],
       openingScene: [{ speaker: "hero", text: "やあ" }],
     });
     await cast(plot.id, character.id, { speakerKey: "hero", roleName: "主人公", isLead: true });
@@ -191,7 +192,7 @@ describe("POST /plots/:aid/edit", () => {
 
     expect((await app().post(`/plots/${plot.aid}/edit`, { token: "other" })).status).toBe(404);
     const body = (await app().json(`/plots/${plot.aid}/edit`, { token: "me" })).plot;
-    expect(body.chapters).toEqual([{ key: "c1", title: "一", objective: "ねらい" }]);
+    expect(body).not.toHaveProperty("chapters");
     expect(body.opening).toEqual([{ speaker: "hero", character_aid: character.aid, text: "やあ", icon: null, image: null }]);
     expect(body.cast[0]).toMatchObject({ speaker_key: "hero", role_name: "主人公", is_lead: true, character: { aid: character.aid, mine: false } });
     expect(body.lores).toEqual([expect.objectContaining({ title: "他人の設定", mine: false, entries: [] })]);

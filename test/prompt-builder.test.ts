@@ -1,5 +1,5 @@
 // 本体の test/services/amis/prompt_builder_test.rb を移したもの。
-// 結末 (@@ending) を廃止したので、その行を書かせないことを確かめるテストに変えてある
+// 章と結末 (@@cleared / @@ending) を廃止したので、それらを書かせないことを確かめるテストに変えてある
 import { describe, expect, it } from "vitest";
 import { type PromptInput, PromptBuilder } from "../src/generation/prompt-builder";
 import type { ChatMessage } from "../src/views/context";
@@ -10,7 +10,7 @@ const VOLATILE = /\d{4}-\d{2}-\d{2}|\d{2}:\d{2}:\d{2}/;
 let nextId = 1;
 function message(values: Partial<ChatMessage>): ChatMessage {
   return {
-    id: nextId++, aid: `msg${nextId}`, chatId: 1, role: 1, status: 0, content: [], chapterKey: "ch1",
+    id: nextId++, aid: `msg${nextId}`, chatId: 1, role: 1, status: 0, content: [],
     speakerCharacterId: null, replacedById: null, aiModelId: null, userRating: 0, autoRating: null, modRating: null,
     rating: 0, streamedAt: null, meta: {}, createdAt: new Date(), updatedAt: new Date(), ...values,
   };
@@ -30,15 +30,8 @@ function input(overrides: Overrides = {}): PromptInput {
       { speakerKey: "ren", roleName: "", roleDescription: "", name: "レン", persona: "一人称は「俺」。皮肉屋。", images: [] },
     ],
     ...overrides,
-    chat: { aid: "chataid0000001", currentChapterKey: "ch1", turnsInChapter: 0, choiceMode: false, replyStyle: 0, finished: false, summaries: [], ...overrides.chat },
-    plot: {
-      situation: "春。主人公は転校初日の教室に立っている。",
-      chapters: [
-        { key: "ch1", title: "出会い", objective: "名前を覚えられる" },
-        { key: "final", title: "答え", objective: "関係が決まる" },
-      ],
-      ...overrides.plot,
-    },
+    chat: { aid: "chataid0000001", choiceMode: false, replyStyle: 0, summaries: [], ...overrides.chat },
+    plot: { situation: "春。主人公は転校初日の教室に立っている。", ...overrides.plot },
   };
 }
 
@@ -68,25 +61,29 @@ describe("PromptBuilder", () => {
     expect(fired).toBe(quiet);
   });
 
-  it("可変要素が 現在の章 より前に現れない", () => {
+  it("system プロンプトに可変要素が現れない", () => {
     const prompt = new PromptBuilder(input()).systemPrompt();
-    const prefix = prompt.slice(0, prompt.indexOf("# 現在の章"));
-    expect(prefix).not.toMatch(VOLATILE);
-    expect(prefix).not.toContain("chataid0000001");
-    expect(prefix).not.toContain("名前を覚えられる");
+    expect(prompt).not.toMatch(VOLATILE);
+    expect(prompt).not.toContain("chataid0000001");
   });
 
   it("セクションはキャッシュ順に並ぶ", () => {
     const headings = new PromptBuilder(input()).systemPrompt().match(/^# .+$/gm);
-    expect(headings).toEqual(["# 絶対ルール", "# 演出方針", "# 出力規約", "# チャットの設定", "# 出演キャラ", "# 状況設定", "# ユーザーの役", "# 現在の章", "# 出力の締めくくり"]);
+    expect(headings).toEqual(["# 絶対ルール", "# 演出方針", "# 出力規約", "# チャットの設定", "# 出演キャラ", "# 状況設定", "# ユーザーの役", "# 出力の締めくくり"]);
   });
 
-  it("章が進んでも 現在の章 までのプレフィックスは変わらない", () => {
+  it("要約が増えても あらすじ までのプレフィックスは変わらない", () => {
     const before = new PromptBuilder(input()).systemPrompt();
-    const after = new PromptBuilder(input({ chat: { currentChapterKey: "final" } })).systemPrompt();
-    const boundary = before.indexOf("# 現在の章");
+    const after = new PromptBuilder(input({ chat: { summaries: [{ text: "二人は名前を交換した。" }] } })).systemPrompt();
+    const boundary = after.indexOf("# これまでのあらすじ");
     expect(after.slice(0, boundary)).toBe(before.slice(0, boundary));
-    expect(after).not.toBe(before);
+    expect(after).toContain("# これまでのあらすじ\n二人は名前を交換した。");
+  });
+
+  // 本体から移した要約には chapter_key が付いていることがある。見出しは付けずに本文だけを並べる
+  it("要約は本文だけを並べ、空のものは飛ばす", () => {
+    const prompt = new PromptBuilder(input({ chat: { summaries: [{ chapter_key: "ch1", text: "一" }, { text: " " }, "壊れた行", { text: "二" }] } })).systemPrompt();
+    expect(prompt).toContain("# これまでのあらすじ\n一\n\n二\n\n# 出力の締めくくり");
   });
 
   // speaker_key は内部の値。モデルには名前だけを書かせ、受け取った名前をこちらで戻す
@@ -130,21 +127,20 @@ describe("PromptBuilder", () => {
     expect(prompt[1].content).toBe("はじめまして");
   });
 
-  it("行形式の出力例とメタ行の書き方を含み、結末 (@@ending) は書かせない", () => {
+  it("行形式の出力例とメタ行の書き方を含み、章のクリア (@@cleared) と結末 (@@ending) は書かせない", () => {
     const prompt = new PromptBuilder(input()).systemPrompt();
     expect(prompt).toMatch(/^@: \S/m);
-    expect(prompt).toContain("@@cleared:");
+    expect(prompt).toContain("@@air:");
+    expect(prompt).not.toContain("@@cleared");
     expect(prompt).not.toContain("@@ending");
     expect(prompt).toContain("JSON・見出し・コードブロック");
-    // 最終章でも結末のキーは並べない
-    expect(new PromptBuilder(input({ chat: { currentChapterKey: "final" } })).systemPrompt()).toContain("これは最終章です。ねらいが達成されたら @@cleared を true にしてください。");
   });
 
   it("選択肢で応答はメタ行に入れさせる (本文には書かせない)", () => {
     const block = new PromptBuilder(input({ chat: { choiceMode: true } })).build().at(-1)!.content;
     expect(block).toContain("`@@choice:` の行でちょうど 3 個");
     expect(block).toContain("選択肢を本文の行に書いてはいけません");
-    expect(block).not.toContain("@@ending");
+    expect(block).not.toContain("@@cleared");
   });
 
   it("選択肢が切られているときは書かないよう明示する", () => {
@@ -218,9 +214,5 @@ describe("PromptBuilder", () => {
     expect(auto.slice(0, normal.length)).toEqual(normal);
     expect(auto.length - normal.length).toBe(1);
     expect(auto.at(-1)!.role).toBe("user");
-  });
-
-  it("章が空なら @@cleared を常に false にするよう指示する", () => {
-    expect(new PromptBuilder(input({ plot: { chapters: [] }, chat: { currentChapterKey: "" } })).systemPrompt()).toContain("@@cleared は常に false");
   });
 });

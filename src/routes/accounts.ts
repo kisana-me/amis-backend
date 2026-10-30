@@ -13,8 +13,7 @@ const LIMIT = 50;
 
 export const accountRoutes = new Hono<AppEnv>();
 
-// アカウントの Amis のページ (本体の accounts#show)。本人には非公開のぶんも返す。
-// 結末の収集 (achievements) は廃止したので、常に空で返す
+// アカウントの Amis のページ (本体の accounts#show)。本人には非公開のぶんも返す
 accountRoutes.post("/accounts/:handle{@.+}", async (c) => {
   const account = await findAccountByNameId(c.var.mainDb, c.env, c.req.param("handle").slice(1));
   if (!account || account.status !== ACCOUNT_STATUSES.normal || account.visibility !== VISIBILITIES.opened) {
@@ -39,6 +38,5 @@ accountRoutes.post("/accounts/:handle{@.+}", async (c) => {
     mine,
     plots: plotRows.map((p) => ({ ...plotJson(p, ctx), ...(mine ? { visibility: visibilityLabel(p.visibility) } : {}) })),
     characters: characterRows.map((ch) => ({ ...characterJson(ch, ctx), ...(mine ? { visibility: visibilityLabel(ch.visibility) } : {}) })),
-    achievements: [],
   });
 });

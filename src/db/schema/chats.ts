@@ -17,10 +17,6 @@ export const chats = sqliteTable("chats", {
   status: integer("status").notNull().default(CHAT_STATUSES.normal),
   replyStyle: integer("reply_style").notNull().default(REPLY_STYLES.balanced),
   choiceMode: integer("choice_mode", { mode: "boolean" }).notNull().default(false),
-  currentChapterKey: text("current_chapter_key").notNull().default(""),
-  turnsInChapter: integer("turns_in_chapter").notNull().default(0),
-  // 最終章のねらいを達成した時刻 (@@cleared)。結末の定義と収集は廃止した
-  finishedAt: integer("finished_at", { mode: "timestamp_ms" }),
   summaries: text("summaries", { mode: "json" }).$type<unknown[]>().notNull().default([]),
   messagesCount: integer("messages_count").notNull().default(0),
   lastMessageAt: integer("last_message_at", { mode: "timestamp_ms" }),

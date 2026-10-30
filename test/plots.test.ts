@@ -8,17 +8,17 @@ const app = () => appWith([me], [{ token: "tok", accountId: 1 }]);
 type Json = Record<string, any>;
 
 describe("POST /plots", () => {
-  it("クリア数の多い順に、公開されているものだけ", async () => {
-    await insertPlot({ title: "少ない", clearsCount: 1 });
-    await insertPlot({ title: "多い", clearsCount: 9 });
-    await insertPlot({ title: "非公開", clearsCount: 99, visibility: 2 });
+  it("いいね数の多い順に、公開されているものだけ", async () => {
+    await insertPlot({ title: "少ない", likesCount: 1 });
+    await insertPlot({ title: "多い", likesCount: 9 });
+    await insertPlot({ title: "非公開", likesCount: 99, visibility: 2 });
     const body = (await (await app().post("/plots")).json()) as Json;
     expect(body.plots.map((p: Json) => p.title)).toEqual(["多い", "少ない"]);
   });
 });
 
 describe("POST /plots/:aid", () => {
-  it("導入・挿絵・章・公開のロア・ペルソナ・続きのチャットを返し、結末は返さない", async () => {
+  it("導入・挿絵・公開のロア・ペルソナ・続きのチャットを返し、章と結末は返さない", async () => {
     const face = await insertImage();
     const scenery = await insertImage();
     const secretShot = await insertImage();
@@ -26,7 +26,6 @@ describe("POST /plots/:aid", () => {
     await db().insert(characterImages).values({ characterId: character.id, imageId: face.id });
 
     const plot = await insertPlot({
-      chapters: [{ key: "c1", title: "はじまり", objective: "秘密", endings: [{ key: "e" }] }, { key: "c2" }, "壊れた行"],
       openingScene: [
         { speaker: "", text: "地の文", image: scenery.aid },
         { speaker: "s1", text: "せりふ", icon: face.aid },
@@ -51,7 +50,7 @@ describe("POST /plots/:aid", () => {
     ]);
     await db().insert(chats).values([
       { aid: uid("ct"), accountId: 1, plotId: plot.id, lastMessageAt: new Date("2026-10-01T00:00:00Z") },
-      { aid: uid("ct"), accountId: 1, plotId: plot.id, title: "新しい", status: 1, lastMessageAt: new Date("2026-10-02T00:00:00Z") },
+      { aid: uid("ct"), accountId: 1, plotId: plot.id, title: "新しい", lastMessageAt: new Date("2026-10-02T00:00:00Z") },
       { aid: uid("ct"), accountId: 1, plotId: plot.id, status: 2, lastMessageAt: new Date("2026-10-03T00:00:00Z") },
     ]);
 
@@ -61,14 +60,13 @@ describe("POST /plots/:aid", () => {
       { speaker: "s1", text: "せりふ", icon: face.aid },
     ]);
     expect(Object.keys(body.plot.scene_images).sort()).toEqual([face.aid, scenery.aid].sort());
-    expect(body.plot.chapters).toEqual([{ key: "c1", title: "はじまり" }, { key: "c2", title: "" }]);
-    expect(body.plot).toMatchObject({ chapters_count: 2, free_form: false, situation: "状況", liked: false });
-    expect(body.plot).not.toHaveProperty("endings");
+    expect(body.plot).toMatchObject({ situation: "状況", liked: false });
+    for (const key of ["chapters", "chapters_count", "free_form", "clears_count", "endings"]) expect(body.plot).not.toHaveProperty(key);
     expect(body.plot.images.map((i: Json) => i.aid)).toEqual([scenery.aid]);
     expect(body.plot.lores.map((l: Json) => l.title)).toEqual(["公開の設定"]);
     expect(body.recommended_personas.map((p: Json) => [p.name, p.recommended, p.icon_url])).toEqual([["一番目", true, null], ["二番目", true, null]]);
     expect(body.latest_chat).toEqual({
-      aid: expect.any(String), display_title: "新しい", finished: true,
+      aid: expect.any(String), display_title: "新しい",
       last_message_at: Date.parse("2026-10-02T00:00:00Z") / 1000,
     });
   });

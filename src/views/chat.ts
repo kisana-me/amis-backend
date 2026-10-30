@@ -2,9 +2,9 @@
 import { CHAT_STATUSES, MESSAGE_ROLES, MESSAGE_STATUSES } from "../db/schema";
 import { ratingLabel } from "../lib/ratings";
 import type { AiModel, Chat, ChatMessage, Persona, Plot, ViewContext } from "./context";
-import { chapterDefinitions, imageUrl, plotJson } from "./json";
+import { imageUrl, plotJson } from "./json";
 
-const CHAT_STATUS_LABELS = ["normal", "finished", "archived", "deleted"] as const;
+const CHAT_STATUS_LABELS: Record<number, string> = { 0: "normal", 2: "archived", 3: "deleted" };
 const REPLY_STYLE_LABELS = ["balanced", "dialogue", "narration"] as const;
 const ROLE_LABELS = ["user", "assistant", "system"] as const;
 const MESSAGE_STATUS_LABELS = ["normal", "pending", "streaming", "replaced", "hidden", "failed", "canceled", "deleted"] as const;
@@ -63,7 +63,6 @@ export function messageJson(message: ChatMessage) {
     aid: message.aid,
     role: ROLE_LABELS[message.role] ?? "user",
     status: MESSAGE_STATUS_LABELS[message.status] ?? "normal",
-    chapter_key: message.chapterKey,
     scene: scene(message),
     choices: choices(message),
     scene_status: sceneStatus(message),
@@ -76,18 +75,13 @@ export function chatStatusLabel(status: number): string {
   return CHAT_STATUS_LABELS[status] ?? "normal";
 }
 
-// _chat.json.jbuilder。結末 (ending_key / ending_title) は廃止した
+// _chat.json.jbuilder。章と結末は廃止した
 export function chatJson(chat: Chat, plot: Plot, ctx: ViewContext, extra: { model: AiModel | null; persona: Persona | null }) {
-  const chapters = chapterDefinitions(plot);
-  const index = chapters.findIndex((c) => c.key === chat.currentChapterKey);
-  const current = index < 0 ? null : chapters[index];
   const personaIcon = extra.persona?.iconId == null ? undefined : ctx.images.get(extra.persona.iconId);
 
   return {
     aid: chat.aid,
     title: chat.title,
-    current_chapter_key: chat.currentChapterKey,
-    turns_in_chapter: chat.turnsInChapter,
     status: chatStatusLabel(chat.status),
     choice_mode: chat.choiceMode,
     reply_style: REPLY_STYLE_LABELS[chat.replyStyle] ?? "balanced",
@@ -96,22 +90,9 @@ export function chatJson(chat: Chat, plot: Plot, ctx: ViewContext, extra: { mode
     model_name: extra.model?.name ?? null,
     display_title: chat.title.trim() !== "" ? chat.title : plot.title,
     archived: chat.status === CHAT_STATUSES.archived,
-    // アーカイブすると status が移ってしまうので、完結したかどうかは時刻で見る
-    finished: chat.finishedAt !== null,
     messages_count: chat.messagesCount,
     last_message_at: seconds(chat.lastMessageAt),
-    finished_at: seconds(chat.finishedAt),
-    // 章の切れ目の暗転演出でタイトルを出すために、章の一覧も付ける
-    plot: { ...plotJson(plot, ctx), chapters },
-    chapter: current
-      ? {
-        key: current.key,
-        title: current.title,
-        index,
-        total: chapters.length,
-        final: present(current.key) && current.key === (chapters.at(-1)?.key ?? ""),
-      }
-      : null,
+    plot: plotJson(plot, ctx),
     persona: extra.persona
       ? {
         aid: extra.persona.aid,

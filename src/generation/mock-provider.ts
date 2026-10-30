@@ -1,5 +1,5 @@
-// API キーなしでも生成〜配信〜章判定まで通しで動かすための擬似上流 (本体の AiClient::MockProvider)。
-// ai_models.provider が "mock" のときだけ使われる。結末 (@@ending) は廃止したので書かない
+// API キーなしでも生成〜配信まで通しで動かすための擬似上流 (本体の AiClient::MockProvider)。
+// ai_models.provider が "mock" のときだけ使われる
 import type { AiResult, ChatMessageParam, Hints } from "./ai-client";
 import { headChars, isPresent, rubyStrip } from "./ruby-text";
 
@@ -74,7 +74,7 @@ function buildPayload(messages: ChatMessageParam[], hints: Hints): string {
   }
 
   // やり直しでは同じターン番号のまま呼ばれる。ずらさないと前回と同じ本文になる
-  const turn = (hints.turnsInChapter ?? 0) + (hints.regenerate ?? 0);
+  const turn = (hints.turn ?? 0) + (hints.regenerate ?? 0);
   // 自動継続とやり直しでは末尾のユーザー発言が指示文なので、鸚鵡返しの対象にしない
   const quiet = hints.autoContinue || (hints.regenerate ?? 0) > 0;
   const lastUser = quiet ? "" : ([...messages].reverse().find((m) => m.role === "user")?.content ?? "");
@@ -87,12 +87,9 @@ function buildPayload(messages: ChatMessageParam[], hints: Hints): string {
     lines.push(`@${key}: ${text}`);
   });
 
-  // 章の「ねらい」があるプロットでは 3 往復目で章が閉じる、という擬似判定
-  const cleared = isPresent(hints.objective) && turn >= 2;
   lines.push(`@@time: 四月${8 + turn}日 放課後 十七時${String((turn * 7) % 60).padStart(2, "0")}分`);
   lines.push(`@@place: ${PLACES[turn % PLACES.length]}`);
   lines.push(`@@air: ${AIRS[turn % AIRS.length]}`);
-  lines.push(`@@cleared: ${cleared}`);
   if (hints.choiceMode) {
     const offset = turn % CHOICES.length;
     for (const choice of [...CHOICES.slice(offset), ...CHOICES.slice(0, offset)]) lines.push(`@@choice: ${choice}`);

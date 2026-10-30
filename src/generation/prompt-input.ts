@@ -31,14 +31,11 @@ export async function loadPromptInput(db: Db, chat: Chat, plot: Plot, ownerName:
   return {
     chat: {
       aid: chat.aid,
-      currentChapterKey: chat.currentChapterKey,
-      turnsInChapter: chat.turnsInChapter,
       choiceMode: chat.choiceMode,
       replyStyle: chat.replyStyle,
-      finished: chat.finishedAt !== null,
       summaries: chat.summaries,
     },
-    plot: { situation: plot.situation, chapters: plot.chapters },
+    plot: { situation: plot.situation },
     casts: casts.map(({ plotCharacter, character }) => ({
       speakerKey: plotCharacter.speakerKey,
       roleName: plotCharacter.roleName,
@@ -56,12 +53,11 @@ export async function loadPromptInput(db: Db, chat: Chat, plot: Plot, ownerName:
   };
 }
 
-// プロンプトに載せる会話。いまの章の、要約に畳んだ分より後ろの normal だけ (本体の Chat#prompt_messages)
+// プロンプトに載せる会話。要約に畳んだ分より後ろの normal だけ (本体の Chat#prompt_messages)
 export async function promptMessages(db: Db, chat: Chat): Promise<ChatMessage[]> {
   return db.select().from(chatMessages)
     .where(and(
       eq(chatMessages.chatId, chat.id),
-      eq(chatMessages.chapterKey, chat.currentChapterKey),
       gt(chatMessages.id, summarizedUptoId(chat)),
       eq(chatMessages.status, MESSAGE_STATUSES.normal),
     ))

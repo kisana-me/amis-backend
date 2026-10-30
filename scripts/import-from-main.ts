@@ -9,7 +9,7 @@
 //
 // - id は本体と同じ値を使う。参照をそのまま保てて、突き合わせもしやすい
 // - 本体の DATETIME はタイムゾーンなしの JST なので、epoch ミリ秒に直す
-// - 廃止したもの (ゲストのチャット、結末、コイン) は持ってこない
+// - 廃止したもの (ゲストのチャット、章、結末、コイン) は持ってこない。完結したチャットは普通のチャットに戻す
 // - 通報は持ってこない (Amis で受け付けた分から始める)
 // - チャットとメッセージ、AI の利用記録は多いので、id の順に区切って読み、読んだそばから書く (全件をメモリに載せない)
 // - 画像は Amis から参照されているものだけを持ってくる。R2 のファイルは別にコピーする。
@@ -144,24 +144,14 @@ insert("characters", characters.map((r) => ({
   messages_count: Number(r.messages_count), meta: json(r.meta, "{}"), ...stamps(r),
 })));
 
-// 結末 (endings) は廃止したので、章の定義から外す
-const withoutEndings = (chapters: unknown) => {
-  const list = JSON.parse(json(chapters, "[]")) as unknown[];
-  return JSON.stringify(list.map((c) => {
-    if (typeof c !== "object" || c === null || Array.isArray(c)) return c;
-    const { endings: _endings, ...rest } = c as Record<string, unknown>;
-    return rest;
-  }));
-};
-
 insert("plots", plots.map((r) => ({
   id: r.id as number, aid: r.aid as string, author_id: r.author_id as number | null, icon_id: imageRef(r.icon_id),
   forked_from_id: r.forked_from_id as number | null,
   title: r.title as string, tagline: r.tagline as string, description: r.description as string,
   situation: r.situation as string, situation_public: bool(r.situation_public),
-  chapters: withoutEndings(r.chapters), opening_scene: json(r.opening_scene, "[]"), allow_fork: bool(r.allow_fork),
+  opening_scene: json(r.opening_scene, "[]"), allow_fork: bool(r.allow_fork),
   status: r.status as number, visibility: r.visibility as number, ...ratings(r), derived_rating: r.derived_rating as number | null,
-  chats_count: Number(r.chats_count), clears_count: Number(r.clears_count), likes_count: r.likes_count as number,
+  chats_count: Number(r.chats_count), likes_count: r.likes_count as number,
   meta: json(r.meta, "{}"), ...stamps(r),
 })));
 
@@ -183,13 +173,25 @@ insert("personas", personas.map((r) => ({
   is_default: bool(r.is_default), position: r.position as number, status: r.status as number, ...stamps(r),
 })));
 
+// 章は廃止したので、章ごとの要約は捨ててローリング要約 (chapter_key が空のもの) だけを残す。
+// 畳んだ位置 (meta.summarized_upto_id) はローリング要約にしか無いので、捨てた分は次の生成で畳み直される
+const rollingSummaries = (summaries: unknown) => {
+  const list = JSON.parse(json(summaries, "[]")) as unknown[];
+  return JSON.stringify(list.flatMap((s) => {
+    if (typeof s !== "object" || s === null || Array.isArray(s)) return [];
+    const { chapter_key: key, text } = s as Record<string, unknown>;
+    return key === undefined || key === null || key === "" ? [{ text }] : [];
+  }));
+};
+// 本体の chats.status の finished (1)。D1 では欠番
+const FINISHED = 1;
+
 // ゲストのチャットは持ってこない
 await eachBatch("SELECT t.* FROM amis_chats t WHERE t.account_id IS NOT NULL", (rows) => insert("chats", rows.map((r) => ({
   id: r.id as number, aid: r.aid as string, account_id: r.account_id as number, plot_id: r.plot_id as number,
   persona_id: r.persona_id as number | null, ai_model_id: r.ai_model_id as number | null,
-  title: r.title as string, status: r.status as number, reply_style: r.reply_style as number, choice_mode: bool(r.choice_mode),
-  current_chapter_key: r.current_chapter_key as string, turns_in_chapter: r.turns_in_chapter as number,
-  finished_at: r.finished_at as Date | null, summaries: json(r.summaries, "[]"),
+  title: r.title as string, status: r.status === FINISHED ? 0 : r.status as number,
+  reply_style: r.reply_style as number, choice_mode: bool(r.choice_mode), summaries: rollingSummaries(r.summaries),
   messages_count: r.messages_count as number, last_message_at: r.last_message_at as Date | null,
   meta: json(r.meta, "{}"), ...stamps(r),
 }))));
@@ -198,7 +200,7 @@ await eachBatch(
   "SELECT t.* FROM amis_chat_messages t JOIN amis_chats c ON c.id = t.chat_id WHERE c.account_id IS NOT NULL",
   (rows) => insert("chat_messages", rows.map((r) => ({
   id: r.id as number, aid: r.aid as string, chat_id: r.chat_id as number, role: r.role as number, status: r.status as number,
-  content: json(r.content, "[]"), chapter_key: r.chapter_key as string,
+  content: json(r.content, "[]"),
   speaker_character_id: r.speaker_character_id as number | null, replaced_by_id: r.replaced_by_id as number | null,
   ai_model_id: r.ai_model_id as number | null, ...ratings(r),
   streamed_at: r.streamed_at as Date | null, meta: json(r.meta, "{}"), ...stamps(r),

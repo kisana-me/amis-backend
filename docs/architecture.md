@@ -31,7 +31,7 @@ Amis Worker ──▶ D1 (amis)        R2 (amis/ 配下)     Images      AI Gate
 | 生成と配信 | SSE (リクエストの中で生成) | WebSocket・DO・Queue は使わない (下の「ストリーミング」と decisions.md を参照) |
 | 非同期処理 | Queues | 画像とテキストの自動判定、本体からのイベント受信 |
 | 定期実行 | Cron Triggers | `SweepGuestsJob` / `SweepStalledMessagesJob` の置き換え |
-| 段数の多い処理 | Workflows (必要なら) | `ChapterSummaryJob` など |
+| 段数の多い処理 | Workflows (必要なら) | 今は無い (要約は生成のあとに `waitUntil` で走らせている) |
 | AI | AI Gateway | Rails の `AiClient` の provider 定義をそのまま TS の fetch に移す |
 | 画像 | Images バインディング + R2 | Amis 専用のバケット `amis-media` の `images/variants/` |
 | OG 画像 | workers-og (satori + resvg-wasm) | 日本語フォントはサブセット化して R2 に置く |

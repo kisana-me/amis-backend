@@ -6,8 +6,7 @@ const PAYLOAD = `@: 教室のドアが開いた。
 @yuki: ……あ、きみが噂の"転校生"？
 よろしく
 @nobody: 知らない子
-@@cleared: true
-@@ending: lover
+@@air: 探り合っている
 `;
 
 function feed(chunks: string[], options: ScenePresenterOptions = {}) {
@@ -114,12 +113,11 @@ describe("ScenePresenter", () => {
   });
 
   // 行形式は「壊れる」状態が無い。途中で切れてもそこまでが残る
-  it("途中で切れてもそこまでの行が残り、メタは進まない側に倒れる", () => {
+  it("途中で切れてもそこまでの行が残り、メタは拾わない", () => {
     const presenter = feed([[...PAYLOAD].slice(0, 40).join("")]);
     expect(presenter.finalize()).toBe(true);
     expect(presenter.normalized()).toHaveLength(2);
-    expect(presenter.isChapterCleared()).toBe(false);
-    expect(presenter.endingKey).toBeNull();
+    expect(presenter.status).toEqual({});
   });
 
   it("書きかけのヘッダで切れたら、その破片は捨てる", () => {
@@ -131,15 +129,15 @@ describe("ScenePresenter", () => {
   it("メタ行を採用する", () => {
     const presenter = feed([PAYLOAD]);
     expect(presenter.finalize()).toBe(true);
-    expect(presenter.isChapterCleared()).toBe(true);
-    expect(presenter.endingKey).toBe("lover");
+    expect(presenter.status).toEqual({ air: "探り合っている" });
   });
 
-  it("ending が - なら結末は確定していない", () => {
-    const presenter = feed(["@: 扉が開いた。\n@@cleared: false\n@@ending: -\n"]);
+  // 章と結末は廃止した。古い癖で書いてきても本文にも状態にも混ぜない
+  it("廃止したメタ行 (@@cleared / @@ending) は読み捨てる", () => {
+    const presenter = feed(["@: 扉が開いた。\n@@cleared: true\n@@ending: lover\n"]);
     expect(presenter.finalize()).toBe(true);
-    expect(presenter.isChapterCleared()).toBe(false);
-    expect(presenter.endingKey).toBeNull();
+    expect(presenter.normalized().map((l) => l.text)).toEqual(["扉が開いた。"]);
+    expect(presenter.status).toEqual({});
   });
 
   it("本文が1文字も無ければ empty", () => {
@@ -155,11 +153,10 @@ describe("ScenePresenter", () => {
   });
 
   it("区切り線や記号だけの行は出さない", () => {
-    const presenter = feed(["@: 扉が開いた。\n@: ---\n@yuki: おかえり\n@@cleared: true\n"]);
+    const presenter = feed(["@: 扉が開いた。\n@: ---\n@yuki: おかえり\n"]);
     expect(presenter.finalize()).toBe(true);
     expect(presenter.normalized().map((l) => l.text)).toEqual(["扉が開いた。", "おかえり"]);
     expect(presenter.noiseLines).toBe(1);
-    expect(presenter.isChapterCleared()).toBe(true);
   });
 
   it("choices を拾う。無ければ空配列", () => {
@@ -173,12 +170,12 @@ describe("ScenePresenter", () => {
     const presenter = feed([`${PAYLOAD}@@choice: \n@@choice: 選択肢\n`]);
     expect(presenter.finalize()).toBe(true);
     expect(presenter.normalized()).toHaveLength(3);
-    expect(presenter.isChapterCleared()).toBe(true);
+    expect(presenter.status).toEqual({ air: "探り合っている" });
     expect(presenter.choices).toEqual(["選択肢"]);
   });
 
   it("場面の状態を拾う", () => {
-    const presenter = feed(["@: 扉が開いた。\n@@time: 四月八日 放課後\n@@place: 旧校舎の階段\n@@air: 探り合っている\n@@cleared: false\n"]);
+    const presenter = feed(["@: 扉が開いた。\n@@time: 四月八日 放課後\n@@place: 旧校舎の階段\n@@air: 探り合っている\n"]);
     expect(presenter.finalize()).toBe(true);
     expect(presenter.status).toEqual({ time: "四月八日 放課後", place: "旧校舎の階段", air: "探り合っている" });
     // 状態は本文に混ざらない

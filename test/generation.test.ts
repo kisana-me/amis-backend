@@ -18,10 +18,10 @@ async function events(res: Response): Promise<Record<string, any>[]> {
   return text.split("\n\n").filter((block) => block.startsWith("data: ")).map((block) => JSON.parse(block.slice(6)));
 }
 
-async function startChat(chapters: unknown[] = [{ key: "c1", title: "出会い", objective: "名前を覚えられる" }]) {
+async function startChat() {
   await insertAiModel({ provider: "mock" });
   const yuki = await insertCharacter({ name: "ユキ" });
-  const plot = await insertPlot({ chapters, openingScene: [{ speaker: null, text: "教室のドアが開いた。" }] });
+  const plot = await insertPlot({ openingScene: [{ speaker: null, text: "教室のドアが開いた。" }] });
   await cast(plot.id, yuki.id, { speakerKey: "yuki", isLead: true });
   const started = (await (await post("/chats/create", { plot_aid: plot.aid })).json()) as Record<string, any>;
   return { yuki, plot, chatAid: started.chat.aid as string, started };
@@ -31,7 +31,7 @@ describe("チャットを始める", () => {
   it("導入を最初の返答として入れ、プロットと主役の遊ばれた回数を数える", async () => {
     const { started, plot, yuki } = await startChat();
     expect(started.messages.map((m: any) => [m.role, m.scene])).toEqual([["assistant", [{ speaker: null, text: "教室のドアが開いた。" }]]]);
-    expect(started.chat).toMatchObject({ current_chapter_key: "c1", messages_count: 1, model_aid: expect.any(String) });
+    expect(started.chat).toMatchObject({ messages_count: 1, model_aid: expect.any(String) });
     expect(started.pending_message_aid).toBeNull();
     const [p] = await db().select().from(characters).where(eq(characters.id, yuki.id));
     expect(p.chatsCount).toBe(1);
@@ -61,18 +61,18 @@ describe("メッセージを送って生成する", () => {
     expect(deltas.length).toBeGreaterThan(1);
     expect(deltas.map((e) => e.seq)).toEqual(deltas.map((_, i) => i + 1));
     const done = stream.at(-1)!;
-    // 送信の時点で章のターン数が 1 になるので、擬似上流は 2 番目の場所を書く
+    // 導入が 1 通目の返答なので、擬似上流は 2 番目の場所を書く
     expect(done).toMatchObject({ type: "done", status: "normal", scene_status: { place: "旧校舎の階段", time: expect.any(String), air: expect.any(String) } });
     expect(done.scene.map((l: any) => l.speaker)).toEqual([null, "yuki"]);
     // 差分は上流の出力そのまま。確定版はキャラのセリフから「」を外したもの (フロントは done で差し替える)
     expect(deltas.filter((e) => e.i === 1).map((e) => e.delta).join("").replace(/^「(.*)」$/gm, "$1")).toBe(done.scene[1].text);
 
     const [message] = await db().select().from(chatMessages).where(eq(chatMessages.aid, sent.message_aid));
-    expect(message).toMatchObject({ status: 0, meta: expect.objectContaining({ chapter_cleared: false, scene_status: done.scene_status }) });
+    expect(message).toMatchObject({ status: 0, meta: expect.objectContaining({ scene_status: done.scene_status }) });
     const usage = await db().select().from(aiUsages);
     expect(usage).toEqual([expect.objectContaining({ chatMessageId: message.id, finishReason: "stop", costMicro: 0 })]);
     const [chat] = await db().select().from(chats).where(eq(chats.aid, chatAid));
-    expect(chat).toMatchObject({ turnsInChapter: 1, messagesCount: 3 });
+    expect(chat).toMatchObject({ status: 0, messagesCount: 3 });
     const [lead] = await db().select().from(characters).where(eq(characters.id, yuki.id));
     expect(lead.messagesCount).toBe(1);
 
@@ -82,17 +82,17 @@ describe("メッセージを送って生成する", () => {
     expect(replay[1].scene).toEqual(done.scene);
   });
 
-  it("3 往復目でねらいを達成すると、最終章ならチャットが完了してクリア数が増える", async () => {
-    const { chatAid, plot } = await startChat();
+  // 章とクリアは廃止した。何往復しても完結にはならず、@@cleared も書かない
+  it("何往復してもチャットは完結しない", async () => {
+    const { chatAid } = await startChat();
     for (let turn = 0; turn < 3; turn++) {
       const sent = (await (await post(`/chats/${chatAid}/messages`, { content: `${turn}回目` })).json()) as Record<string, any>;
       await events(await post(`/messages/${sent.message_aid}/stream`));
     }
     const shown = (await (await post(`/chats/${chatAid}`)).json()) as Record<string, any>;
-    expect(shown.chat).toMatchObject({ status: "finished", finished: true });
-    const [p] = await db().select().from(chats).where(eq(chats.aid, chatAid));
-    expect(p.finishedAt).not.toBeNull();
-    expect(plot.id).toBeGreaterThan(0);
+    expect(shown.chat.status).toBe("normal");
+    expect(shown.chat).not.toHaveProperty("finished");
+    expect(shown.chat).not.toHaveProperty("chapter");
   });
 
   it("キャンセルすると生成が止まり、そこまでの本文を canceled で残す", async () => {

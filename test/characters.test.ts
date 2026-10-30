@@ -70,7 +70,7 @@ describe("POST /characters/:aid", () => {
     await db().insert(characterLikes).values({ accountId: 1, characterId: character.id });
 
     const other = await insertCharacter({ name: "相方" });
-    const lead = await insertPlot({ title: "主役", clearsCount: 1, chapters: [{ key: "c1" }, { key: "c2" }] });
+    const lead = await insertPlot({ title: "主役", likesCount: 1 });
     await cast(lead.id, other.id, { position: 0 });
     await cast(lead.id, character.id, { position: 1, isLead: true });
     const support = await insertPlot({ title: "脇役" });
@@ -89,10 +89,10 @@ describe("POST /characters/:aid", () => {
     expect(body.lead_plots.map((p: Json) => p.title)).toEqual(["主役"]);
     expect(body.cast_plots.map((p: Json) => p.title)).toEqual(["脇役"]);
     const plot = body.lead_plots[0];
-    expect(plot).toMatchObject({ free_form: false, chapters_count: 2, clears_count: 1, official: false });
+    expect(plot).toMatchObject({ likes_count: 1, official: false });
+    for (const key of ["free_form", "chapters_count", "clears_count"]) expect(plot).not.toHaveProperty(key);
     expect(plot.cast.map((c: Json) => [c.character.name, c.is_lead])).toEqual([["相方", false], ["キャラ", true]]);
     expect(plot.lead_character.aid).toBe(character.aid);
-    expect(body.cast_plots[0]).toMatchObject({ free_form: true, chapters_count: 0 });
 
     const mine = (await (await app().post(`/characters/${character.aid}`, { token: "author" })).json()) as Json;
     expect(mine.character.liked).toBe(true);

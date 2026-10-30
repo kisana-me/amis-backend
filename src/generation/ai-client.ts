@@ -26,10 +26,10 @@ export type Hints = {
   mode?: "summary";
   speakerKeys?: string[];
   speakerNames?: string[];
-  turnsInChapter?: number;
+  // 返答の通し番号 (MockProvider が台本を回すのに使う)
+  turn?: number;
   regenerate?: number;
   autoContinue?: boolean;
-  objective?: string;
   choiceMode?: boolean;
 };
 

@@ -13,7 +13,7 @@ import { maxRatingFor } from "../lib/ratings";
 import { findVisiblePlot, visiblePlots } from "../queries/visibility";
 import { loadCasts, loadContext, loadersOf, type Plot } from "../views/context";
 import {
-  chapterDefinitions, chapterEditDefinitions, editableCharacterJson, editableLoreJson, imageDisplayUrl, imageJson, imageUrl,
+  editableCharacterJson, editableLoreJson, imageDisplayUrl, imageJson, imageUrl,
   openingImageAids, openingLines, ownedImageJson, plotIconUrl, plotJson, visibilityLabel,
 } from "../views/json";
 
@@ -29,8 +29,8 @@ plotRoutes.post("/plots", async (c) => {
   const order =
     sort === "new" ? [desc(plots.id)]
     : sort === "trending" ? [desc(plots.chatsCount), desc(plots.id)]
-    // 完結数がランキングの主指標
-    : [desc(plots.clearsCount), desc(plots.chatsCount), desc(plots.id)];
+    // いいね数がランキングの主指標
+    : [desc(plots.likesCount), desc(plots.chatsCount), desc(plots.id)];
 
   const rows = await c.var.db.select().from(plots)
     .where(visiblePlots(maxRatingFor(c.var.currentAccount)))
@@ -90,8 +90,6 @@ async function plotEditJson(c: Context<AppEnv>, plot: Plot) {
         is_lead: plotCharacter.isLead,
         character: editableCharacterJson(character, ctx, viewer.id, owned.get(character.id) ?? []),
       })),
-      // 結末 (endings) は廃止した
-      chapters: chapterEditDefinitions(plot),
       lores: attachedLores.map((lore) => editableLoreJson(lore, entries.get(lore.id) ?? [], ctx, viewer.id)),
       recommended_personas: recommended.map((p) => ({ aid: p.aid, name: p.name, description: p.description })),
     },
@@ -131,7 +129,7 @@ plotRoutes.delete("/plots/:aid", requireSignin, async (c) => {
   return c.json({ status: "success" });
 });
 
-// 本体の plots#show。一覧に出ないものでも作者本人には見せる。結末 (endings) は廃止した
+// 本体の plots#show。一覧に出ないものでも作者本人には見せる
 plotRoutes.post("/plots/:aid{[a-z0-9]{14}}", async (c) => {
   const { db } = c.var;
   const account = c.var.currentAccount;
@@ -153,7 +151,7 @@ plotRoutes.post("/plots/:aid{[a-z0-9]{14}}", async (c) => {
     // 続きから遊べるチャット。開始ボタンの飛び先になる
     account
       ? db.select().from(chats)
-        .where(and(eq(chats.accountId, account.id), eq(chats.plotId, plot.id), inArray(chats.status, [CHAT_STATUSES.normal, CHAT_STATUSES.finished])))
+        .where(and(eq(chats.accountId, account.id), eq(chats.plotId, plot.id), eq(chats.status, CHAT_STATUSES.normal)))
         .orderBy(desc(chats.lastMessageAt), desc(chats.id)).limit(1)
       : Promise.resolve([]),
     account
@@ -200,7 +198,6 @@ plotRoutes.post("/plots/:aid{[a-z0-9]{14}}", async (c) => {
         const image = ctx.images.get(id);
         return image ? [imageJson(image, ctx)] : [];
       }),
-      chapters: chapterDefinitions(plot),
       lores: attachedLores,
       liked: like !== undefined,
     },
@@ -216,7 +213,6 @@ plotRoutes.post("/plots/:aid{[a-z0-9]{14}}", async (c) => {
       ? {
         aid: latest.aid,
         display_title: latest.title.trim() !== "" ? latest.title : plot.title,
-        finished: latest.status === CHAT_STATUSES.finished,
         last_message_at: latest.lastMessageAt ? Math.floor(latest.lastMessageAt.getTime() / 1000) : null,
       }
       : null,

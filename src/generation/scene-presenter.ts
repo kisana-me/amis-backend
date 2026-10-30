@@ -11,8 +11,6 @@ const MAX_RAW_BYTES = 200_000;
 const MAX_CHOICES = 3;
 const MAX_IMAGES = 1;
 
-// 進む側の判定は取りこぼしても害が小さいほうへ倒す。cleared は明示的な真だけを見る
-const TRUTHY = ["true", "yes", "1", "はい"];
 const BLANK_VALUES = ["-", "null", "none", "なし", "no", "false"];
 // 場面の状態。長い説明を書いてくることがあるので頭で切る
 export const STATUS_KEYS = ["time", "place", "air"] as const;
@@ -64,8 +62,6 @@ export class ScenePresenter implements SceneParserHandler {
   private lines: (Line | undefined)[] = [];
   private events: SceneEvent[] = [];
   private rawChoices: string[] = [];
-  private chapterCleared = false;
-  private endingKeyValue: string | null = null;
   private statusValues: Record<string, string> = {};
   private rawBytes = 0;
   private readonly parser = new SceneStreamParser(this);
@@ -93,14 +89,6 @@ export class ScenePresenter implements SceneParserHandler {
 
   isEmpty(): boolean {
     return !this.presentLines().some((line) => isPresent(line.text));
-  }
-
-  isChapterCleared(): boolean {
-    return this.chapterCleared;
-  }
-
-  get endingKey(): string | null {
-    return isPresent(this.endingKeyValue) ? this.endingKeyValue : null;
   }
 
   // 壊れていれば空配列に倒し、UI は自由入力のままにする
@@ -161,8 +149,6 @@ export class ScenePresenter implements SceneParserHandler {
 
     this.parseError = "no scene line";
     this.lines = [{ index: 0, speaker: null, text, icon: null, image: null }];
-    this.chapterCleared = false;
-    this.endingKeyValue = null;
     return true;
   }
 
@@ -192,14 +178,6 @@ export class ScenePresenter implements SceneParserHandler {
   onMeta(key: string, value: string): void {
     const lower = value.toLowerCase();
     switch (key) {
-      case "cleared":
-      case "chapter_cleared":
-        this.chapterCleared = TRUTHY.includes(lower);
-        break;
-      case "ending":
-      case "ending_key":
-        if (isPresent(value) && !BLANK_VALUES.includes(lower)) this.endingKeyValue = value;
-        break;
       case "choice":
         if (isPresent(value)) this.rawChoices.push(value);
         break;
