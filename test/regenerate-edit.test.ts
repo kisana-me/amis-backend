@@ -2,7 +2,9 @@ import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app";
-import { characterImages, chatMessages, chats, MESSAGE_ROLES, MESSAGE_STATUSES, plotImages } from "../src/db/schema";
+import { aiUsages, characterImages, chatMessages, chats, MESSAGE_ROLES, MESSAGE_STATUSES, plotImages } from "../src/db/schema";
+import type { Bindings } from "../src/env";
+import { summarize } from "../src/generation/summary";
 import { accountRow, cast, ctx, db, fakeMainDb, insertAiModel, insertCharacter, insertImage, insertPlot, settle, uid } from "./helpers";
 
 const app = () => createApp({ mainDb: () => fakeMainDb([accountRow(1), accountRow(2)], [{ token: "me", accountId: 1 }, { token: "other", accountId: 2 }]) });
@@ -168,15 +170,23 @@ describe("チャットの設定と削除", () => {
   });
 });
 
+// D1 は 1 文の変数の数に上限があるので、1 通ずつ batch に積む
+async function insertTurns(chatId: number, count: number) {
+  const [first, ...rest] = Array.from({ length: count }, (_, i) => db().insert(chatMessages).values({
+    aid: uid("ms"), chatId, role: i % 2 === 0 ? MESSAGE_ROLES.user : MESSAGE_ROLES.assistant,
+    content: [{ speaker: null, text: `${i}通目` }],
+  }));
+  await db().batch([first, ...rest]);
+}
+
+const summarizeNow = (chatId: number) => summarize({ db: db(), env: env as unknown as Bindings, ownerName: "テスト" }, chatId);
+const summaryUsages = async () => (await db().select().from(aiUsages)).filter((u) => u.purpose === 1);
+const chatRow = async (id: number) => (await db().select().from(chats).where(eq(chats.id, id)))[0];
+
 describe("ローリング要約", () => {
   it("会話が伸びたら、末尾を残して古いぶんを要約に畳む", async () => {
     const { chat, chatAid } = await setup();
-    // D1 は 1 文の変数の数に上限があるので、1 通ずつ batch に積む
-    const [first, ...rest] = Array.from({ length: 40 }, (_, i) => db().insert(chatMessages).values({
-      aid: uid("ms"), chatId: chat.id, role: i % 2 === 0 ? MESSAGE_ROLES.user : MESSAGE_ROLES.assistant,
-      content: [{ speaker: null, text: `${i}通目` }],
-    }));
-    await db().batch([first, ...rest]);
+    await insertTurns(chat.id, 40);
     await drain((await json(post(`/chats/${chatAid}/messages`, { content: "続き" }))).message_aid);
 
     const [row] = await db().select().from(chats).where(eq(chats.aid, chatAid));
@@ -184,5 +194,50 @@ describe("ローリング要約", () => {
     // 導入・既存の 1 通・足した 40 通・今回の 2 通のうち、末尾の 24 通を残す
     const ids = (await db().select({ id: chatMessages.id }).from(chatMessages).where(eq(chatMessages.chatId, chat.id))).map((m) => m.id).sort((a, b) => a - b);
     expect(row.meta).toMatchObject({ summarized_upto_id: ids.at(-25) });
+    // 終わったらリースを手放す
+    expect(row.meta).not.toHaveProperty("summary_started_at");
+  });
+
+  it("同じチャットで同時に走らせても、畳むのは 1 回だけ", async () => {
+    const { chat } = await setup();
+    await insertTurns(chat.id, 40);
+    await Promise.all([summarizeNow(chat.id), summarizeNow(chat.id)]);
+    expect((await chatRow(chat.id)).summaries).toHaveLength(1);
+    expect(await summaryUsages()).toHaveLength(1);
+  });
+
+  it("ほかの実行がリースを持っている間は何もしない。期限が切れていれば取り直す", async () => {
+    const { chat } = await setup();
+    await insertTurns(chat.id, 40);
+    await db().update(chats).set({ meta: { summary_started_at: Date.now() } }).where(eq(chats.id, chat.id));
+    await summarizeNow(chat.id);
+    expect((await chatRow(chat.id)).summaries).toEqual([]);
+    expect(await summaryUsages()).toHaveLength(0);
+
+    // 落ちた実行が握ったままのリース
+    await db().update(chats).set({ meta: { summary_started_at: Date.now() - 10 * 60_000 } }).where(eq(chats.id, chat.id));
+    await summarizeNow(chat.id);
+    const row = await chatRow(chat.id);
+    expect(row.summaries).toHaveLength(1);
+    expect(row.meta).not.toHaveProperty("summary_started_at");
+  });
+
+  it("要約が 6 本を超えたら、新しい 3 本を残して古いものを 1 本にまとめ直す", async () => {
+    const { chat } = await setup();
+    await insertTurns(chat.id, 40);
+    const old = Array.from({ length: 6 }, (_, i) => ({ text: `要約${i + 1}` }));
+    await db().update(chats).set({ summaries: old }).where(eq(chats.id, chat.id));
+    await summarizeNow(chat.id);
+
+    const { summaries } = await chatRow(chat.id);
+    expect(summaries).toEqual([
+      // 擬似上流は渡された本文の頭をそのまま返すので、古い 4 本がまとめに入ったことが分かる
+      { text: expect.stringMatching(/^（擬似要約）要約1 要約2 要約3 要約4$/) },
+      { text: "要約5" },
+      { text: "要約6" },
+      { text: expect.stringMatching(/^（擬似要約）/) },
+    ]);
+    // 畳む 1 回とまとめ直す 1 回
+    expect(await summaryUsages()).toHaveLength(2);
   });
 });
