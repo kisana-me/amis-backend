@@ -9,7 +9,7 @@
 //
 // - id は本体と同じ値を使う。参照をそのまま保てて、突き合わせもしやすい
 // - 本体の DATETIME はタイムゾーンなしの JST なので、epoch ミリ秒に直す
-// - 廃止したもの (ゲストのチャット、章、結末、コイン) は持ってこない。完結したチャットは普通のチャットに戻す
+// - 廃止したもの (ゲストのチャット、章、結末、コイン) は持ってこない。完結したチャットは普通のチャットに戻し、章ごとの要約は普通の要約にする
 // - 通報は持ってこない (Amis で受け付けた分から始める)
 // - チャットとメッセージ、AI の利用記録は多いので、id の順に区切って読み、読んだそばから書く (全件をメモリに載せない)
 // - 画像は Amis から参照されているものだけを持ってくる。R2 のファイルは別にコピーする。
@@ -173,27 +173,37 @@ insert("personas", personas.map((r) => ({
   is_default: bool(r.is_default), position: r.position as number, status: r.status as number, ...stamps(r),
 })));
 
-// 章は廃止したので、章ごとの要約は捨ててローリング要約 (chapter_key が空のもの) だけを残す。
-// 畳んだ位置 (meta.summarized_upto_id) はローリング要約にしか無いので、捨てた分は次の生成で畳み直される
-const rollingSummaries = (summaries: unknown) => {
+// 章は廃止したので、章ごとの要約もローリング要約と同じ「畳んだ要約」として持ってくる (並びは古い順のまま)
+const plainSummaries = (summaries: unknown) => {
   const list = JSON.parse(json(summaries, "[]")) as unknown[];
   return JSON.stringify(list.flatMap((s) => {
     if (typeof s !== "object" || s === null || Array.isArray(s)) return [];
-    const { chapter_key: key, text } = s as Record<string, unknown>;
-    return key === undefined || key === null || key === "" ? [{ text }] : [];
+    const { text } = s as Record<string, unknown>;
+    return typeof text === "string" && text.trim() !== "" ? [{ text }] : [];
   }));
+};
+// 本体では、章が閉じたときにその章の会話を要約し、プロンプトには今の章の会話だけを載せていた。
+// 閉じた章の会話 (今の章ではないもの) は要約済みなので、その最後の 1 通までを畳んだ位置にする。
+// ローリング要約で畳んだ位置を持っていれば、進んでいるほうを使う
+const withSummarizedUpto = (r: Row) => {
+  const meta = JSON.parse(json(r.meta, "{}")) as Record<string, unknown>;
+  const upto = Math.max(Math.trunc(Number(meta.summarized_upto_id) || 0), Number(r.closed_upto_id) || 0);
+  return JSON.stringify(upto > 0 ? { ...meta, summarized_upto_id: upto } : meta);
 };
 // 本体の chats.status の finished (1)。D1 では欠番
 const FINISHED = 1;
 
 // ゲストのチャットは持ってこない
-await eachBatch("SELECT t.* FROM amis_chats t WHERE t.account_id IS NOT NULL", (rows) => insert("chats", rows.map((r) => ({
+await eachBatch(`
+  SELECT t.*,
+    (SELECT MAX(m.id) FROM amis_chat_messages m WHERE m.chat_id = t.id AND m.chapter_key <> t.current_chapter_key) AS closed_upto_id
+  FROM amis_chats t WHERE t.account_id IS NOT NULL`, (rows) => insert("chats", rows.map((r) => ({
   id: r.id as number, aid: r.aid as string, account_id: r.account_id as number, plot_id: r.plot_id as number,
   persona_id: r.persona_id as number | null, ai_model_id: r.ai_model_id as number | null,
   title: r.title as string, status: r.status === FINISHED ? 0 : r.status as number,
-  reply_style: r.reply_style as number, choice_mode: bool(r.choice_mode), summaries: rollingSummaries(r.summaries),
+  reply_style: r.reply_style as number, choice_mode: bool(r.choice_mode), summaries: plainSummaries(r.summaries),
   messages_count: r.messages_count as number, last_message_at: r.last_message_at as Date | null,
-  meta: json(r.meta, "{}"), ...stamps(r),
+  meta: withSummarizedUpto(r), ...stamps(r),
 }))));
 
 await eachBatch(

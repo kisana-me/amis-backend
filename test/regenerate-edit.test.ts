@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app";
 import { aiUsages, characterImages, chatMessages, chats, MESSAGE_ROLES, MESSAGE_STATUSES, plotImages } from "../src/db/schema";
 import type { Bindings } from "../src/env";
+import { promptMessages } from "../src/generation/prompt-input";
 import { summarize } from "../src/generation/summary";
 import { accountRow, cast, ctx, db, fakeMainDb, insertAiModel, insertCharacter, insertImage, insertPlot, settle, uid } from "./helpers";
 
@@ -239,5 +240,24 @@ describe("ローリング要約", () => {
     ]);
     // 畳む 1 回とまとめ直す 1 回
     expect(await summaryUsages()).toHaveLength(2);
+  });
+
+  it("要約はチャットで選んだモデルではなく、既定のモデルで書く", async () => {
+    const { chat } = await setup();
+    const premium = await insertAiModel({ name: "上位", tier: 1 });
+    await db().update(chats).set({ aiModelId: premium.id }).where(eq(chats.id, chat.id));
+    await insertTurns(chat.id, 40);
+    await summarizeNow(chat.id);
+    const [usage] = await summaryUsages();
+    expect(usage.aiModelId).not.toBe(premium.id);
+  });
+
+  it("プロンプトに載せる会話は、新しい側から 120 通まで", async () => {
+    const { chat } = await setup();
+    await insertTurns(chat.id, 130);
+    const messages = await promptMessages(db(), await chatRow(chat.id));
+    expect(messages).toHaveLength(120);
+    expect(messages.at(-1)!.content).toEqual([{ speaker: null, text: "129通目" }]);
+    expect(messages.map((m) => m.id)).toEqual([...messages.map((m) => m.id)].sort((a, b) => a - b));
   });
 });

@@ -1,5 +1,5 @@
 // PromptBuilder に渡すものを D1 からまとめて読み込む
-import { and, asc, eq, gt, inArray } from "drizzle-orm";
+import { and, desc, eq, gt, inArray } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { inChunks } from "../db/client";
 import { chatMessages, images, MESSAGE_STATUSES, personas, plotLores } from "../db/schema";
@@ -53,15 +53,21 @@ export async function loadPromptInput(db: Db, chat: Chat, plot: Plot, ownerName:
   };
 }
 
-// プロンプトに載せる会話。要約に畳んだ分より後ろの normal だけ (本体の Chat#prompt_messages)
+// 要約が失敗し続けたり、移行で畳み損ねたりしても、コンテキストが青天井にならないための上限。
+// ふだんは 80 通を超えたところで畳むので効かない (run.ts の ROLLING_TRIGGER_MESSAGES)
+const MAX_PROMPT_MESSAGES = 120;
+
+// プロンプトに載せる会話。要約に畳んだ分より後ろの normal を、新しい側から最大 MAX_PROMPT_MESSAGES 通 (本体の Chat#prompt_messages)
 export async function promptMessages(db: Db, chat: Chat): Promise<ChatMessage[]> {
-  return db.select().from(chatMessages)
+  const rows = await db.select().from(chatMessages)
     .where(and(
       eq(chatMessages.chatId, chat.id),
       gt(chatMessages.id, summarizedUptoId(chat)),
       eq(chatMessages.status, MESSAGE_STATUSES.normal),
     ))
-    .orderBy(asc(chatMessages.id));
+    .orderBy(desc(chatMessages.id))
+    .limit(MAX_PROMPT_MESSAGES);
+  return rows.reverse();
 }
 
 export function summarizedUptoId(chat: Chat): number {

@@ -8,7 +8,7 @@ import type { Bindings } from "../env";
 import { scene } from "../views/chat";
 import { type AiModel, loadCasts } from "../views/context";
 import { streamCompletion } from "./ai-client";
-import { costMicro, findModelById, usableModel } from "./models";
+import { contentRating, costMicro, defaultModel } from "./models";
 import summaryMerge from "./prompts/summary-merge.txt";
 import summarySystem from "./prompts/summary-system.txt";
 import { summarizedUptoId } from "./prompt-input";
@@ -59,13 +59,14 @@ async function fold(deps: Deps, chatId: number) {
   const { messages, uptoId } = await sourceMessages(db, chat);
   if (uptoId === null) return;
 
-  const model = await usableModel(db, 0, await findModelById(db, chat.aiModelId));
-  if (!model) return;
-
   const [[plot], [persona]] = await Promise.all([
     db.select().from(plots).where(eq(plots.id, chat.plotId)).limit(1),
     chat.personaId === null ? Promise.resolve([]) : db.select().from(personas).where(eq(personas.id, chat.personaId)).limit(1),
   ]);
+  // 要約はユーザーに見えない裏方なので、チャットで選んだモデル (premium や推論の遅いもの) ではなく既定のモデルで書く。
+  // 既定はプロットのレーティングで選ぶ。全年齢で選ぶと、年齢制限のある会話を渡せないモデルに当たる
+  const model = await defaultModel(db, await contentRating(db, plot));
+  if (!model) return;
   const names = new Map(((await loadCasts(db, [plot])).get(plot.id) ?? []).map((c) => [c.plotCharacter.speakerKey, c.character.name]));
   const userName = isPresent(persona?.name) ? persona!.name : deps.ownerName;
 
@@ -78,22 +79,26 @@ async function fold(deps: Deps, chatId: number) {
   const text = await complete(deps, chat, model, summarySystem, transcript);
   if (!text) return;
 
-  let summaries = [...summaryTexts(chat.summaries), text];
-  if (summaries.length > MAX_SUMMARIES) {
-    const older = summaries.slice(0, summaries.length - KEEP_RECENT_SUMMARIES);
-    // まとめ直しに失敗しても、畳んだぶんは残す。次の実行でもう一度まとめ直す
-    const merged = await complete(deps, chat, model, summaryMerge, older.join("\n\n")).catch((error) => {
-      console.error("summary merge failed", error);
-      return null;
-    });
-    if (merged) summaries = [merged, ...summaries.slice(-KEEP_RECENT_SUMMARIES)];
-  }
-
+  // 畳んだ結果を先に書く。まとめ直しの途中で打ち切られても (waitUntil は 30 秒まで)、畳んだぶんは進む。
   // リースが期限切れになって別の実行に追い越されていたら、畳んだ位置が進んでいる。そのときは書かずに捨てる
-  await db.update(chats).set({
+  const summaries = [...summaryTexts(chat.summaries), text];
+  const folded = await db.update(chats).set({
     summaries: summaries.map((t) => ({ text: t })),
     meta: sql`json_set(${chats.meta}, '$.summarized_upto_id', ${uptoId})`,
-  }).where(and(eq(chats.id, chat.id), sql`coalesce(json_extract(${chats.meta}, '$.summarized_upto_id'), 0) = ${fromId}`));
+  }).where(and(eq(chats.id, chat.id), sql`coalesce(json_extract(${chats.meta}, '$.summarized_upto_id'), 0) = ${fromId}`)).run();
+  if (folded.meta.changes === 0 || summaries.length <= MAX_SUMMARIES) return;
+
+  // まとめ直しに失敗しても、次に畳むときにもう一度まとめ直す
+  const older = summaries.slice(0, summaries.length - KEEP_RECENT_SUMMARIES);
+  const merged = await complete(deps, chat, model, summaryMerge, older.join("\n\n"));
+  if (!merged) return;
+  // 書いた直後から誰も要約を足していないときだけ差し替える
+  await db.update(chats).set({ summaries: [merged, ...summaries.slice(-KEEP_RECENT_SUMMARIES)].map((t) => ({ text: t })) })
+    .where(and(
+      eq(chats.id, chat.id),
+      sql`coalesce(json_extract(${chats.meta}, '$.summarized_upto_id'), 0) = ${uptoId}`,
+      sql`json_array_length(${chats.summaries}) = ${summaries.length}`,
+    ));
 }
 
 // 1 回の要約。原価はその場で記録する (使えなかった出力のぶんも払っている)
