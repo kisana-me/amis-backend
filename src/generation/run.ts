@@ -25,8 +25,9 @@ const PERSIST_INTERVAL_MS = 1000;
 const WALL_CLOCK_LIMIT_MS = 180_000;
 // プロンプトに載せる不採用の出力。増やすほど前の案に引きずられ、トークンも伸びる
 const MAX_REJECTED = 3;
-// ローリング要約を走らせる会話の長さ
-const ROLLING_TRIGGER_MESSAGES = 40;
+// ローリング要約を走らせる会話の長さ。畳むたびに system プロンプトが変わってキャッシュが全損するので、
+// 細かく畳まず、ある程度溜めてからまとめて畳む (残す数は summary.ts の ROLLING_KEEP_MESSAGES)
+const ROLLING_TRIGGER_MESSAGES = 80;
 
 class Canceled extends Error {}
 class WallClockExceeded extends Error {}

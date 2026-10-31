@@ -186,14 +186,14 @@ const chatRow = async (id: number) => (await db().select().from(chats).where(eq(
 describe("ローリング要約", () => {
   it("会話が伸びたら、末尾を残して古いぶんを要約に畳む", async () => {
     const { chat, chatAid } = await setup();
-    await insertTurns(chat.id, 40);
+    await insertTurns(chat.id, 80);
     await drain((await json(post(`/chats/${chatAid}/messages`, { content: "続き" }))).message_aid);
 
     const [row] = await db().select().from(chats).where(eq(chats.aid, chatAid));
     expect(row.summaries).toEqual([{ text: expect.stringMatching(/^（擬似要約）/) }]);
-    // 導入・既存の 1 通・足した 40 通・今回の 2 通のうち、末尾の 24 通を残す
+    // 導入・既存の 1 通・足した 80 通・今回の 2 通のうち、末尾の 30 通を残す
     const ids = (await db().select({ id: chatMessages.id }).from(chatMessages).where(eq(chatMessages.chatId, chat.id))).map((m) => m.id).sort((a, b) => a - b);
-    expect(row.meta).toMatchObject({ summarized_upto_id: ids.at(-25) });
+    expect(row.meta).toMatchObject({ summarized_upto_id: ids.at(-31) });
     // 終わったらリースを手放す
     expect(row.meta).not.toHaveProperty("summary_started_at");
   });

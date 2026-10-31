@@ -16,7 +16,7 @@ import { isPresent, rubyStrip } from "./ruby-text";
 
 const MAX_SOURCE_MESSAGES = 200;
 // 畳まずに生のまま残す末尾のメッセージの数
-const ROLLING_KEEP_MESSAGES = 24;
+const ROLLING_KEEP_MESSAGES = 30;
 // 要約がこの本数を超えたら、新しい側の KEEP_RECENT_SUMMARIES 本を残して古いものを 1 本にまとめる
 const MAX_SUMMARIES = 6;
 const KEEP_RECENT_SUMMARIES = 3;
